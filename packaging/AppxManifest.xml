@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10" xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10" xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3" xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10" xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities" IgnorableNamespaces="uap uap3 com rescap">
+  <Identity Name="Kanu.TribitConnect" Publisher="CN=TribitConnect.Local" Version="0.1.1.0" ProcessorArchitecture="x64"/>
+  <Properties><DisplayName>Tribit Connect</DisplayName><PublisherDisplayName>Local development</PublisherDisplayName><Logo>Assets\StoreLogo.png</Logo></Properties>
+  <Resources><Resource Language="en-us"/></Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22621.0" MaxVersionTested="10.0.26300.0"/>
+    <PackageDependency Name="Microsoft.WindowsAppRuntime.2" Publisher="CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US" MinVersion="2.5.1.0"/>
+  </Dependencies>
+  <Applications>
+    <Application Id="App" Executable="TribitConnect.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Tribit Connect" Description="Lightweight XSound Plus 2 controls" BackgroundColor="transparent" Square150x150Logo="Assets\Logo150.png" Square44x44Logo="Assets\Logo44.png"/>
+      <Extensions>
+        <com:Extension Category="windows.comServer"><com:ComServer><com:ExeServer Executable="TribitConnect.exe" Arguments="--provider" DisplayName="Tribit Connect"><com:Class Id="A3FB741B-A71F-48B5-904E-4605D8D02772" DisplayName="Tribit Connect Widget"/></com:ExeServer></com:ComServer></com:Extension>
+        <uap3:Extension Category="windows.appExtension"><uap3:AppExtension Name="com.microsoft.windows.widgets" DisplayName="Tribit Connect" Id="TribitConnect.Provider" PublicFolder="Public"><uap3:Properties>
+          <WidgetProvider>
+            <ProviderIcons><Icon Path="Assets\StoreLogo.png"/></ProviderIcons>
+            <Activation><CreateInstance ClassId="A3FB741B-A71F-48B5-904E-4605D8D02772"/></Activation>
+            <Definitions><Definition Id="XSoundPlus2" DisplayName="XSound Plus 2" Description="Battery, EQ presets and speaker settings" AllowMultiple="false" IsCustomizable="false">
+              <Capabilities><Capability><Size Name="medium"/></Capability><Capability><Size Name="large"/></Capability></Capabilities>
+              <ThemeResources><Icons><Icon Path="Assets\StoreLogo.png"/></Icons><Screenshots><Screenshot Path="Assets\Preview.png" DisplayAltText="Illustrative preview of XSound Plus 2 battery and EQ presets"/></Screenshots><DarkMode/><LightMode/></ThemeResources>
+            </Definition></Definitions>
+          </WidgetProvider>
+        </uap3:Properties></uap3:AppExtension></uap3:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+  <Capabilities><rescap:Capability Name="runFullTrust"/><DeviceCapability Name="bluetooth"/></Capabilities>
+</Package>

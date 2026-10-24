@@ -3,17 +3,7 @@
 #include <thread>
 
 using namespace tribit;
-using namespace std::chrono_literals;
 
-static std::string quoted(const std::string& text){
-    std::string out="\"";
-    for(char c:text){
-        if(c=='"'||c=='\\'){out+='\\';out+=c;}
-        else if(static_cast<unsigned char>(c)<0x20){char esc[8];std::snprintf(esc,sizeof esc,"\\u%04x",c);out+=esc;}
-        else out+=c;
-    }
-    return out+"\"";
-}
 static std::string command_hex(uint8_t command){return hex(std::span<const uint8_t>(&command,1));}
 
 struct Snapshot{
@@ -63,7 +53,7 @@ static void snapshot(Speaker& speaker,const PairedSpeaker& device,bool verified_
     if(buttons.empty())s.unanswered.push_back(command_hex(GetEqButtons));
     if(listen.count()>0){
         std::cerr<<"Listening for "<<listen.count()<<" s; press buttons on the speaker now.\n";
-        auto deadline=Speaker::Clock::now()+listen;
+        auto deadline=Clock::now()+listen;
         while(auto frame=speaker.receive(deadline))speaker.unsolicited.push_back(std::move(*frame));
     }
 

@@ -46,3 +46,5 @@ Not captured: countdown to shutdown set command, custom EQ band frequencies
 - Preset ids confirmed by applying them from Windows and checking the app:
   2 = Audiobook, 4 = Rock. The full list is 0 XBass Off, 1 XBass, 2 Audiobook,
   3 MaxSound traditional, 4 Rock, 5 Jazz.
+- 0x08 read `01` on a later run (it had been `00`), so it is not simply "countdown off";
+  its meaning is still unknown.

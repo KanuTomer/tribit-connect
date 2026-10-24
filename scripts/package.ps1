@@ -1,0 +1,80 @@
+param([switch]$Register)
+$ErrorActionPreference='Stop'
+$taskRoot=Split-Path $PSScriptRoot -Parent
+$taskVersion=([xml](Get-Content -LiteralPath (Join-Path $taskRoot 'packaging\AppxManifest.xml') -Raw)).Package.Identity.Version
+$taskExe=Join-Path $taskRoot 'build\bin\Release\TribitConnect.exe'
+if(-not(Test-Path -LiteralPath $taskExe)){throw 'Run scripts/build.ps1 first.'}
+$taskStage=Join-Path $taskRoot 'out\package'
+$taskAssets=Join-Path $taskStage 'Assets'
+New-Item -Path $taskAssets,(Join-Path $taskStage 'Public') -ItemType Directory -Force | Out-Null
+# A registered development build runs from this folder; stop only that copy before replacing it.
+$taskStaged=Join-Path $taskStage 'TribitConnect.exe'
+foreach($taskProcess in @(Get-Process -Name TribitConnect -ErrorAction SilentlyContinue | Where-Object {$_.Path -eq $taskStaged})){
+    Stop-Process -InputObject $taskProcess -Force
+    if(-not $taskProcess.WaitForExit(5000)){throw 'The staged Tribit Connect did not exit; close it and retry.'}
+}
+Copy-Item -LiteralPath $taskExe -Destination $taskStage -Force
+Copy-Item -LiteralPath (Join-Path $taskRoot 'assets/icons/LUCIDE-LICENSE.txt') -Destination $taskStage -Force
+Copy-Item -LiteralPath (Join-Path $taskRoot '.deps\nuget\widgets\license.txt') -Destination (Join-Path $taskStage 'WindowsAppSDK-LICENSE.txt') -Force
+Copy-Item -LiteralPath (Join-Path $taskRoot 'packaging\AppxManifest.xml') -Destination $taskStage -Force
+
+# Generate application icons and a clearly illustrative picker preview.
+Add-Type -AssemblyName System.Drawing
+$taskIcons=Join-Path $taskStage 'Public\Icons'
+if(Test-Path -LiteralPath $taskIcons){Get-ChildItem -LiteralPath $taskIcons -Filter '*.png' | Remove-Item}
+& (Join-Path $PSScriptRoot 'export-icons.ps1') -Destination $taskIcons
+$taskLogoSource=[System.Drawing.Bitmap]::FromFile((Join-Path $taskStage 'Public\Icons\speaker-accent.png'))
+foreach($taskSize in 44,50,150){
+    $taskBitmap=[System.Drawing.Bitmap]::new($taskSize,$taskSize)
+    $taskGraphics=[System.Drawing.Graphics]::FromImage($taskBitmap)
+    $taskGraphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $taskGraphics.Clear([System.Drawing.Color]::Transparent)
+    $taskGraphics.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+    $taskGraphics.DrawImage($taskLogoSource,0,0,$taskSize,$taskSize)
+    $taskName=if($taskSize -eq 50){'StoreLogo.png'}else{"Logo$taskSize.png"}
+    $taskBitmap.Save((Join-Path $taskAssets $taskName),[System.Drawing.Imaging.ImageFormat]::Png)
+    $taskGraphics.Dispose();$taskBitmap.Dispose()
+}
+$taskLogoSource.Dispose()
+$taskBitmap=[System.Drawing.Bitmap]::new(600,400)
+$taskGraphics=[System.Drawing.Graphics]::FromImage($taskBitmap)
+$taskGraphics.Clear([System.Drawing.ColorTranslator]::FromHtml('#24262F'))
+$taskFont=[System.Drawing.Font]::new('Segoe UI',[single]19)
+$taskBrush=[System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+$taskSmallFont=[System.Drawing.Font]::new('Segoe UI',[single]13)
+$taskGraphics.DrawString("XSound Plus 2",$taskFont,$taskBrush,[single]28,[single]24)
+$taskGraphics.DrawString("Battery 80%",$taskSmallFont,$taskBrush,[single]30,[single]76)
+$taskIndex=0
+foreach($taskPreset in 'XBass Off','XBass','MaxSound','Rock','Audiobook','Jazz'){
+    $taskX=28+($taskIndex%3)*182;$taskY=120+[math]::Floor($taskIndex/3)*48;$taskIndex++
+    $taskPanel=[System.Drawing.SolidBrush]::new([System.Drawing.ColorTranslator]::FromHtml('#36383D'))
+    $taskGraphics.FillRectangle($taskPanel,$taskX,$taskY,170,40);$taskPanel.Dispose()
+    $taskGraphics.DrawString($taskPreset,$taskSmallFont,$taskBrush,[single]($taskX+12),[single]($taskY+8))
+}
+$taskGraphics.DrawString("Speaker settings   ›",$taskFont,$taskBrush,[single]30,[single]232)
+$taskGraphics.DrawString("Voice prompts and auto shutdown",$taskSmallFont,$taskBrush,[single]30,[single]280)
+$taskGraphics.DrawString("Illustrative preview",$taskSmallFont,$taskBrush,[single]30,[single]364)
+$taskBitmap.Save((Join-Path $taskAssets 'Preview.png'),[System.Drawing.Imaging.ImageFormat]::Png)
+$taskSmallFont.Dispose();$taskBrush.Dispose();$taskFont.Dispose();$taskGraphics.Dispose();$taskBitmap.Dispose()
+Copy-Item -LiteralPath (Join-Path $taskAssets 'StoreLogo.png') -Destination (Join-Path $taskStage 'Public\Icon.png') -Force
+
+if($Register){
+    # Developer Mode registers the staged folder in place; no certificate is created or trusted.
+    Add-AppxPackage -Register (Join-Path $taskStage 'AppxManifest.xml') -ForceApplicationShutdown
+    $taskInstalled=Get-AppxPackage -Name Kanu.TribitConnect
+    if(-not $taskInstalled){throw 'Registration could not be confirmed.'}
+    Write-Output "Registered Tribit Connect $($taskInstalled.Version) from $taskStage. Add XSound Plus 2 from Win + W > Add widgets."
+    return
+}
+$taskSdk=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin\10.0.26100.0\x64'
+$taskCert=Get-ChildItem Cert:\CurrentUser\My | Where-Object {$_.Subject -eq 'CN=TribitConnect.Local' -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(7)} | Sort-Object NotAfter -Descending | Select-Object -First 1
+if(-not $taskCert){$taskCert=New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=TribitConnect.Local' -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(1)}
+$taskOut=Join-Path $taskRoot 'out'
+$taskPackage=Join-Path $taskOut "TribitConnect_$taskVersion.msix"
+& (Join-Path $taskSdk 'makeappx.exe') pack /d $taskStage /p $taskPackage /o
+if($LASTEXITCODE -ne 0){throw 'MSIX validation/packaging failed.'}
+& (Join-Path $taskSdk 'signtool.exe') sign /fd SHA256 /sha1 $taskCert.Thumbprint /s My $taskPackage
+if($LASTEXITCODE -ne 0){throw 'MSIX signing failed.'}
+Export-Certificate -Cert $taskCert -FilePath (Join-Path $taskOut 'TribitConnect.Local.cer') -Force | Out-Null
+Write-Output "Signed package: $taskPackage"
+Write-Output 'The private signing key stays in the Windows certificate store; no PFX is exported.'

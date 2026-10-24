@@ -10,6 +10,19 @@
 #include <functional>
 #include <string>
 
+using Clock=std::chrono::steady_clock;
+using namespace std::chrono_literals;
+
+static std::string quoted(const std::string& text){
+    std::string out="\"";
+    for(char c:text){
+        if(c=='"'||c=='\\'){out+='\\';out+=c;}
+        else if(static_cast<unsigned char>(c)<0x20){char esc[8];std::snprintf(esc,sizeof esc,"\\u%04x",static_cast<unsigned>(static_cast<unsigned char>(c)));out+=esc;}
+        else out+=c;
+    }
+    return out+"\"";
+}
+
 namespace tribit {
 inline std::string narrow(const std::wstring& text){
     if(text.empty())return {};
@@ -31,6 +44,8 @@ inline std::optional<BTH_ADDR> parse_address(const std::string& text){
     BTH_ADDR address=0;for(unsigned byte:b)address=(address<<8)|byte;return address;
 }
 
+// A paired speaker that Windows has not connected: wait for the link instead of retrying.
+struct NotConnected:std::runtime_error{using std::runtime_error::runtime_error;};
 struct PairedSpeaker{std::wstring name;BTH_ADDR address{};bool connected{};};
 
 // Looks only at devices Windows already knows; never scans or pairs.
@@ -39,7 +54,9 @@ inline PairedSpeaker find_speaker(std::optional<BTH_ADDR> wanted){
     search.fReturnAuthenticated=TRUE;search.fReturnRemembered=TRUE;search.fReturnConnected=TRUE;search.fIssueInquiry=FALSE;
     BLUETOOTH_DEVICE_INFO info{sizeof info};
     HBLUETOOTH_DEVICE_FIND find=BluetoothFindFirstDevice(&search,&info);
-    if(!find)throw std::runtime_error("No paired Bluetooth devices were found. Pair the speaker in Windows Bluetooth settings.");
+    // Windows sometimes returns an empty search while a speaker powers down; for the
+    // remembered speaker that means "not connected", not "never paired".
+    if(!find){if(wanted)throw NotConnected("Speaker not connected.");throw std::runtime_error("No paired Bluetooth devices were found. Pair the speaker in Windows Bluetooth settings.");}
     std::optional<PairedSpeaker> match;
     do{
         std::wstring name=info.szName;
@@ -52,59 +69,76 @@ inline PairedSpeaker find_speaker(std::optional<BTH_ADDR> wanted){
     return *match;
 }
 
+// Event-driven RFCOMM link: an idle connection sleeps on wait_handle() until the speaker sends data.
 class Speaker{
 public:
-    using Clock=std::chrono::steady_clock;
     std::function<void(const char*,std::span<const uint8_t>)> trace;
+    std::deque<Frame> unsolicited;
     size_t tx{},rx{};
 
-    Speaker(){WSADATA data;if(WSAStartup(MAKEWORD(2,2),&data))throw std::runtime_error("Winsock could not start.");}
-    ~Speaker(){if(socket_!=INVALID_SOCKET)closesocket(socket_);WSACleanup();}
+    Speaker(){
+        WSADATA data;if(WSAStartup(MAKEWORD(2,2),&data))throw std::runtime_error("Winsock could not start.");
+        event_=WSACreateEvent();if(event_==WSA_INVALID_EVENT){WSACleanup();throw std::runtime_error("Could not create a socket event.");}
+    }
+    ~Speaker(){if(socket_!=INVALID_SOCKET){shutdown(socket_,SD_BOTH);closesocket(socket_);}WSACloseEvent(event_);WSACleanup();}
     Speaker(const Speaker&)=delete;Speaker& operator=(const Speaker&)=delete;
+    HANDLE wait_handle()const{return event_;}
 
-    void connect(BTH_ADDR address){
+    void connect(BTH_ADDR address,std::chrono::milliseconds timeout=10s){
         socket_=::socket(AF_BTH,SOCK_STREAM,BTHPROTO_RFCOMM);
         if(socket_==INVALID_SOCKET)throw std::runtime_error("Could not create a Bluetooth socket.");
+        if(WSAEventSelect(socket_,event_,FD_CONNECT|FD_READ|FD_CLOSE)==SOCKET_ERROR)fail("Bluetooth socket setup failed");
         SOCKADDR_BTH target{};target.addressFamily=AF_BTH;target.btAddr=address;target.port=kRfcommChannel;
-        if(::connect(socket_,reinterpret_cast<sockaddr*>(&target),sizeof target)==SOCKET_ERROR)
-            throw std::runtime_error("RFCOMM connection failed (error "+std::to_string(WSAGetLastError())+
-                "). Turn the speaker on and close the Tribit app on your phone.");
+        if(::connect(socket_,reinterpret_cast<sockaddr*>(&target),sizeof target)==SOCKET_ERROR){
+            if(WSAGetLastError()!=WSAEWOULDBLOCK)fail("RFCOMM connection failed");
+            // A phone holding the control channel makes Windows wait about 20 s; give up sooner.
+            if(WaitForSingleObject(event_,static_cast<DWORD>(timeout.count()))!=WAIT_OBJECT_0)
+                throw std::runtime_error("The speaker did not accept the control connection. Close the Tribit app on your phone and retry.");
+            WSANETWORKEVENTS events{};
+            if(WSAEnumNetworkEvents(socket_,event_,&events)==SOCKET_ERROR)fail("RFCOMM connection failed");
+            if(!(events.lNetworkEvents&FD_CONNECT)||events.iErrorCode[FD_CONNECT_BIT])
+                throw std::runtime_error("RFCOMM connection failed (error "+std::to_string(events.iErrorCode[FD_CONNECT_BIT])+
+                    "). Turn the speaker on and close the Tribit app on your phone.");
+        }
         // The speaker drops a frame sent straight after the channel opens.
         Sleep(500);
     }
     void send(std::span<const uint8_t> bytes){
         if(trace)trace("tx",bytes);
-        size_t sent=0;
+        size_t sent=0;int waits=0;
         while(sent<bytes.size()){
             int n=::send(socket_,reinterpret_cast<const char*>(bytes.data()+sent),static_cast<int>(bytes.size()-sent),0);
-            if(n==SOCKET_ERROR)throw std::runtime_error("Bluetooth send failed (error "+std::to_string(WSAGetLastError())+").");
-            sent+=n;
+            if(n!=SOCKET_ERROR){sent+=n;continue;}
+            if(WSAGetLastError()!=WSAEWOULDBLOCK||++waits>100)fail("Bluetooth send failed");
+            Sleep(10);
         }
         ++tx;
     }
-    // Next speaker frame, or nullopt once the deadline passes.
+    // Next speaker frame, or nullopt once the deadline passes. A past deadline only drains buffered data.
     std::optional<Frame> receive(Clock::time_point deadline){
+        bool reset=false;
         for(;;){
             if(auto frame=parser_.next()){++rx;if(trace)trace("rx",encode(frame->command,frame->data,true));return frame;}
-            auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-Clock::now()).count();
-            if(left<=0)return std::nullopt;
-            fd_set read;FD_ZERO(&read);FD_SET(socket_,&read);
-            timeval wait{static_cast<long>(left/1000),static_cast<long>(left%1000*1000)};
-            int ready=::select(0,&read,nullptr,nullptr,&wait);
-            if(ready==SOCKET_ERROR)throw std::runtime_error("Bluetooth wait failed.");
-            if(!ready)return std::nullopt;
             uint8_t chunk[512];
             int n=::recv(socket_,reinterpret_cast<char*>(chunk),sizeof chunk,0);
-            if(n==0)throw std::runtime_error("The speaker closed the connection.");
-            if(n==SOCKET_ERROR)throw std::runtime_error("Bluetooth receive failed (error "+std::to_string(WSAGetLastError())+").");
-            parser_.feed({chunk,static_cast<size_t>(n)});
+            if(n>0){parser_.feed({chunk,static_cast<size_t>(n)});reset=false;continue;}
+            if(n==0)throw NotConnected("The speaker closed the control connection.");
+            if(WSAGetLastError()!=WSAEWOULDBLOCK)fail("Bluetooth receive failed");
+            // Clear the event before sleeping on it, then read once more so data that
+            // arrived in between is not missed and an idle socket never spins.
+            if(!reset){
+                WSANETWORKEVENTS events{};
+                if(WSAEnumNetworkEvents(socket_,event_,&events)==SOCKET_ERROR)fail("Bluetooth wait failed");
+                if(events.lNetworkEvents&FD_CLOSE)throw NotConnected("The speaker closed the control connection.");
+                reset=true;continue;
+            }
+            auto left=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-Clock::now()).count();
+            if(left<=0)return std::nullopt;
+            if(WaitForSingleObject(event_,static_cast<DWORD>(left))!=WAIT_OBJECT_0)return std::nullopt;
+            reset=false;
         }
     }
-    // Sends one frame and collects up to `count` replies for that command; anything else is kept as unsolicited.
-    std::vector<Frame> request(uint8_t command,std::span<const uint8_t> data={},size_t count=1,std::chrono::milliseconds timeout=std::chrono::milliseconds(1500)){
-        send(encode(command,data));
-        return collect(command,count,timeout);
-    }
+    // Collects up to `count` replies for `command`; other frames are kept as unsolicited.
     std::vector<Frame> collect(uint8_t command,size_t count,std::chrono::milliseconds timeout){
         std::vector<Frame> replies;
         auto deadline=Clock::now()+timeout;
@@ -115,9 +149,14 @@ public:
         }
         return replies;
     }
-    std::deque<Frame> unsolicited;
+    std::vector<Frame> request(uint8_t command,std::span<const uint8_t> data={},size_t count=1,std::chrono::milliseconds timeout=1500ms){
+        send(encode(command,data));
+        return collect(command,count,timeout);
+    }
 private:
     SOCKET socket_{INVALID_SOCKET};
+    WSAEVENT event_{WSA_INVALID_EVENT};
     Parser parser_;
+    [[noreturn]] static void fail(const char* what){throw std::runtime_error(std::string(what)+" (error "+std::to_string(WSAGetLastError())+").");}
 };
 }

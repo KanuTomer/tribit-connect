@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Widget Mock</title>
+<script src="https://unpkg.com/adaptivecards@3.0.4/dist/adaptivecards.min.js"></script>
+<script src="cards.js"></script>
+<style>
+  /* Approximates the Windows 11 widget board. Sizes measured from the real board at 175% scaling. */
+  :root{--board:#202020;--widget:#2c2c2c;--text:#fff;--subtle:#c8c8c8;--chrome:#3a3a3a;--warn:#ff99a4;--ok:#6ccb5f}
+  :root[data-theme="light"]{--board:#e9e9e9;--widget:#f9f9f9;--text:#1b1b1b;--subtle:#5d5d5d;--chrome:#ffffff;--warn:#c42b1c;--ok:#0f7b0f}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--board);color:var(--text);font-family:"Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;font-size:14px}
+  header.bar{position:sticky;top:0;z-index:2;display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;padding:12px 16px;background:var(--chrome);border-bottom:1px solid #8884}
+  header.bar h1{font-size:16px;font-weight:600;margin:0 8px 0 0}
+  label{display:flex;gap:6px;align-items:center;color:var(--subtle)}
+  select,button{font:inherit;color:var(--text);background:var(--widget);border:1px solid #8886;border-radius:4px;padding:4px 8px}
+  main{display:flex;flex-wrap:wrap;gap:24px;padding:24px 16px;align-items:flex-start}
+  figure{margin:0}
+  figcaption{color:var(--subtle);font-size:12px;margin:0 0 6px 2px;display:flex;justify-content:space-between;gap:8px}
+  .widget{width:300px;border-radius:8px;background:var(--widget);overflow:hidden;position:relative}
+  .widget .head{height:44px;display:flex;align-items:center;gap:8px;padding:0 16px;font-size:14px}
+  .widget .head .dots{margin-left:auto;cursor:pointer;padding:2px 6px;border-radius:4px;letter-spacing:1px}
+  .widget .head .dots:hover{background:#8883}
+  .widget .head svg{width:16px;height:16px;color:#4cc2ff}
+  :root[data-theme="light"] .widget .head svg{color:#0067c0}
+  .widget .body{position:absolute;left:16px;right:16px;top:44px;bottom:8px;overflow:hidden}
+  .limits .widget .body{outline:1px dashed #4cc2ff88}
+  .over{color:var(--warn)} .fits{color:var(--ok)}
+  .menu{position:absolute;right:12px;top:40px;z-index:3;background:var(--chrome);border:1px solid #8886;border-radius:6px;padding:4px;min-width:140px;box-shadow:0 8px 24px #0006}
+  .menu div{padding:6px 10px;border-radius:4px;cursor:pointer} .menu div:hover{background:#8883}
+  .menu .on::before{content:"• "}
+  #toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--chrome);border:1px solid #8886;border-radius:6px;padding:8px 14px;opacity:0;transition:opacity .2s;pointer-events:none}
+  #toast.show{opacity:1}
+  /* The Windows host adds no padding to the card or to styled containers; the JS renderer adds 15px. */
+  .ac-adaptiveCard,.ac-container,.ac-columnSet,.ac-column{padding:0!important}
+  /* Host behaviour the JS renderer does not have: rounded styled tiles and hover feedback. */
+  .ac-container[style*="background"]{border-radius:4px}
+  .ac-selectable{cursor:pointer}
+  /* An inset overlay lightens any tile, including tinted ones, like the host's hover and press states. */
+  .ac-selectable:hover{box-shadow:inset 0 0 0 999px #ffffff12}
+  .ac-selectable:active{box-shadow:inset 0 0 0 999px #ffffff1f}
+  :root[data-theme="light"] .ac-selectable:hover{box-shadow:inset 0 0 0 999px #0000000a}
+  :root[data-theme="light"] .ac-selectable:active{box-shadow:inset 0 0 0 999px #00000014}
+  .ac-selectable:not([style*="background"]){border-radius:4px}
+  .ac-image{display:block}
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1>XSound Plus 2 widget mock</h1>
+  <label>Theme <select id="theme"><option value="dark">Dark</option><option value="light">Light</option></select></label>
+  <label>Speaker <select id="state"></select></label>
+  <label>Zoom <select id="zoom"><option>1</option><option>1.25</option><option selected>1.5</option><option>1.75</option></select></label>
+  <label><input type="checkbox" id="limits"> Show content area</label>
+  <button id="reset">Back to Home</button>
+</header>
+<main id="board"></main>
+<div id="toast"></div>
+<script>
+const SIZES={medium:300,large:434};
+const STATES=[["connected","Connected"],["low-battery","Low battery"],["custom-eq","Custom EQ active"],["updating","Updating"],["connecting","Connecting"],["disconnected","Disconnected (speaker off)"],["unavailable","Controls unavailable (phone has it)"],["never-connected","Never connected"]];
+const NAMES={0:"XBass Off",1:"XBass",2:"Audiobook",3:"MaxSound traditional",4:"Rock",5:"Jazz"};
+const view={theme:"dark",state:"connected",preset:1,widgets:{medium:{page:"home",detail:0},large:{page:"home",detail:0}}};
+const $=id=>document.getElementById(id);
+
+function stateKey(){return view.state==="connected"?"connected-"+view.preset:view.state;}
+function cardFor(size){
+  const w=view.widgets[size];
+  for(let d=w.detail;d>=0;d--){const card=MOCK_CARDS[[stateKey(),size,w.page,d].join("|")];if(card){w.detail=d;return card;}}
+  w.page="home";w.detail=0;return MOCK_CARDS[[stateKey(),size,"home",0].join("|")];
+}
+// The provider sends `${$host.hostTheme == 'dark' ? 'dark url' : 'light url'}`; resolve it like the host does.
+function resolveTheme(card){
+  return JSON.parse(JSON.stringify(card).replace(/\$\{\$host\.hostTheme == 'dark' \? '([^']*)' : '([^']*)'\}/g,(m,dark,light)=>view.theme==="dark"?dark:light));
+}
+function hostConfig(){
+  const dark=view.theme==="dark";
+  const colors={default:{default:dark?"#FFFFFF":"#1B1B1B",subtle:dark?"#C8C8C8":"#5D5D5D"},accent:{default:dark?"#4CC2FF":"#0067C0",subtle:dark?"#4CC2FF":"#0067C0"},
+    attention:{default:dark?"#FF99A4":"#C42B1C",subtle:dark?"#FF99A4":"#C42B1C"},good:{default:dark?"#6CCB5F":"#0F7B0F",subtle:dark?"#6CCB5F":"#0F7B0F"},
+    warning:{default:dark?"#FCE100":"#9D5D00",subtle:dark?"#FCE100":"#9D5D00"},light:{default:"#FFFFFF",subtle:"#FFFFFFCC"},dark:{default:"#000000",subtle:"#000000CC"}};
+  return new AdaptiveCards.HostConfig({
+    fontFamily:"'Segoe UI Variable Text','Segoe UI',sans-serif",supportsInteractivity:true,
+    spacing:{small:4,default:8,medium:12,large:16,extraLarge:24,padding:0},
+    fontSizes:{small:12,default:14,medium:20,large:24,extraLarge:28},fontWeights:{lighter:300,default:400,bolder:600},
+    lineHeights:{small:16,default:20,medium:26,large:32,extraLarge:36},
+    // The renderer reads 8-digit colours as #AARRGGBB.
+    containerStyles:{default:{backgroundColor:"#00000000",foregroundColors:colors},emphasis:{backgroundColor:dark?"#0FFFFFFF":"#08000000",foregroundColors:colors}},
+    imageSizes:{small:40,medium:80,large:160},actions:{maxActions:5,showCard:{actionMode:"inline"}}
+  });
+}
+function toast(text){const t=$("toast");t.textContent=text;t.classList.add("show");clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove("show"),1800);}
+function act(size,action){
+  if(action.isEnabled===false)return;
+  const verb=action.verb||"",w=view.widgets[size];
+  const pages={"view.home":"home","view.more":"more","view.prompts":"prompts","view.diagnostics":"device"};
+  if(pages[verb]){w.page=pages[verb];w.detail=0;}
+  else if(verb==="view.details.next")w.detail++;
+  else if(verb==="view.details.previous")w.detail=Math.max(0,w.detail-1);
+  else if(verb.startsWith("eq.preset.")){
+    if(view.state!=="connected"&&view.state!=="custom-eq"&&view.state!=="low-battery"){toast("Presets need a connection");return;}
+    const next=+verb.slice(10);
+    view.state="connected";view.preset=next;$("state").value="connected";toast("Preset: "+NAMES[next]);
+  }else{toast(verb+" (acts only in the real widget)");return;}
+  render();
+}
+const ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect width="16" height="20" x="4" y="2" rx="2"/><circle cx="12" cy="14" r="4"/><path d="M12 6h.01"/></svg>';
+function render(){
+  document.documentElement.dataset.theme=view.theme;
+  // CSS zoom reflows the layout, so widgets wrap to the window instead of overflowing it.
+  const board=$("board");board.innerHTML="";board.style.zoom=$("zoom").value;
+  for(const size of ["medium","large"]){
+    const fig=document.createElement("figure");
+    const cap=document.createElement("figcaption");
+    const frame=document.createElement("div");frame.className="widget";frame.style.height=SIZES[size]+"px";
+    frame.innerHTML='<div class="head">'+ICON+'<span>XSound Plus 2</span><span class="dots" title="More options">•••</span></div><div class="body"></div>';
+    const body=frame.querySelector(".body");
+    const card=new AdaptiveCards.AdaptiveCard();card.hostConfig=hostConfig();
+    card.onExecuteAction=a=>act(size,a);
+    card.parse(resolveTheme(cardFor(size)));
+    const element=card.render();body.appendChild(element);
+    fig.append(cap,frame);board.appendChild(fig);
+    // The board clips anything taller than the widget; say so instead of hiding it silently.
+    const w=view.widgets[size];
+    requestAnimationFrame(()=>{const over=element.scrollHeight-body.clientHeight;
+      cap.innerHTML="<span>"+size[0].toUpperCase()+size.slice(1)+" · "+w.page+(w.detail?" p"+(w.detail+1):"")+"</span>"+
+        (over>0?'<span class="over">clipped by '+over+'px</span>':'<span class="fits">'+(body.clientHeight-element.scrollHeight)+'px free</span>');});
+    frame.querySelector(".dots").onclick=e=>{e.stopPropagation();menu(frame,size);};
+  }
+}
+// The host's ••• menu: Customize (which opens settings) and the size choices.
+function menu(frame,size){
+  document.querySelectorAll(".menu").forEach(m=>m.remove());
+  const m=document.createElement("div");m.className="menu";
+  const items=[["Medium","medium"],["Large","large"]].map(([l,s])=>'<div data-s="'+s+'" class="'+(s===size?"on":"")+'">'+l+'</div>').join("");
+  m.innerHTML='<div data-c="1">Customize</div>'+items;
+  m.onclick=e=>{const t=e.target;if(t.dataset.c){view.widgets[size]={page:"more",detail:0};render();}
+    else if(t.dataset.s&&t.dataset.s!==size){view.widgets[t.dataset.s]={...view.widgets[size]};toast("Each size is shown side by side; copied this view to "+t.dataset.s);render();}m.remove();};
+  frame.appendChild(m);
+  setTimeout(()=>document.addEventListener("click",()=>m.remove(),{once:true}));
+}
+// Default to the largest zoom that still fits all three widgets side by side.
+$("zoom").value=["1.75","1.5","1.25","1"].find(z=>z*(2*300+24)+32<=window.innerWidth)||"1";
+for(const [id,label] of STATES){const o=document.createElement("option");o.value=id;o.textContent=label;$("state").appendChild(o);}
+$("theme").onchange=e=>{view.theme=e.target.value;render();};
+$("state").onchange=e=>{view.state=e.target.value;render();};
+$("zoom").onchange=render;
+$("limits").onchange=e=>{document.body.classList.toggle("limits",e.target.checked);};
+$("reset").onclick=()=>{for(const s in view.widgets)view.widgets[s]={page:"home",detail:0};render();};
+if(window.AdaptiveCards&&window.MOCK_CARDS){render();
+  // #measure: layout numbers for checking the mock against the real board.
+  if(location.hash==="#measure")setTimeout(()=>{const out=[...document.querySelectorAll(".widget .body")].map(b=>{const root=b.firstElementChild,cs=getComputedStyle(root);
+    const words=[...b.querySelectorAll(".ac-textBlock")].filter(t=>/Audiobook|MaxSound/.test(t.textContent)).map(t=>Math.round(t.getBoundingClientRect().width));
+    return {body:b.clientHeight,root:root.scrollHeight,pad:cs.padding,first:root.firstElementChild&&root.firstElementChild.offsetTop,words};});
+    document.title=JSON.stringify(out);},500);}
+else document.getElementById("board").textContent=window.MOCK_CARDS?"The Adaptive Cards renderer did not load (needs internet).":"cards.js is missing: run scripts/mock.ps1.";
+</script>
+</body>
+</html>
