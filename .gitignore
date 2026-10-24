@@ -1,0 +1,9 @@
+/build/
+/out/
+/artifacts/
+*.user
+*.log
+*.cfa
+*.zip
+.env
+.env.*
