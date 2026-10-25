@@ -7,7 +7,7 @@ using winrt::Windows::Data::Json::JsonObject;
 static void expect(bool value,const char* message){if(!value)throw std::runtime_error(message);}
 
 static Snapshot connected(){
-    Snapshot s;s.ready=s.fresh=true;s.status="Connected";s.firmware="0.3.1";s.address="F4:4E:FC:C3:DD:50";
+    Snapshot s;s.ready=s.fresh=true;s.status="Connected";s.firmware="0.3.1";s.address="00:11:22:33:44:55";
     s.battery=64;s.preset=tribit::XBass;s.prompts={1,1,1,1,0};s.auto_shutdown=1;s.buttons={0,1,3};s.checked=1;
     return s;
 }
@@ -16,42 +16,58 @@ int main(){try{
     winrt::init_apartment(winrt::apartment_type::multi_threaded);
     Snapshot offline;offline.error="The speaker did not accept the control connection. Close the Tribit app on your phone and retry.";
     Snapshot custom=connected();custom.preset=tribit::Custom;
+    Snapshot off=connected();off.ready=off.fresh=false;off.status="Not connected";
+    Snapshot busy=connected();busy.pending=true;
+    Snapshot low=connected();low.battery=12;
+    auto view_of=[](WidgetPage page,int details=0){WidgetView view;view.page=page;view.details_page=details;return view;};
+    auto parse=[](const std::string& json){return JsonObject::Parse(winrt::to_hstring(json));};
+    auto has=[](const std::string& json,const char* text){return json.find(text)!=std::string::npos;};
+    auto data=[&](const Snapshot& s,WidgetPage page=WidgetPage::Home,const WidgetView* view=nullptr,const WidgetIcons& icons={}){
+        return parse(make_card(s,WidgetSize::Medium,view?*view:view_of(page),icons).data);};
+    auto str=[](const JsonObject& o,const wchar_t* key){return winrt::to_string(o.GetNamedString(key));};
+    WidgetIcons art;for(int id:kPresetOrder)for(int h:kCurveHeights)art.curves[{id,h}]={"light-"+std::to_string(id),"dark-"+std::to_string(id)+"-"+std::to_string(h)};
+
+    // The template never depends on the speaker's state, so state changes are data-only updates
+    // and the host keeps the card and its images instead of rebuilding it (which flashed).
     const WidgetPage pages[]={WidgetPage::Home,WidgetPage::More,WidgetPage::Prompts,WidgetPage::Diagnostics};
-    for(auto& state:{connected(),offline,custom,Snapshot{}})
+    WidgetView chosen;chosen.proposed=Command{Operation::Preset,tribit::Rock};
+    for(auto* icons:{&art,static_cast<WidgetIcons*>(nullptr)})
         for(auto size:{WidgetSize::Medium,WidgetSize::Large})
             for(auto page:pages)for(int details=0;details<3;++details){
-                WidgetView view;view.page=page;view.details_page=details;
-                auto card=make_card(state,size,view);
-                expect(JsonObject::Parse(winrt::to_hstring(card)).GetNamedString(L"type")==L"AdaptiveCard","Every page and size must be a valid card");
+                auto view=view_of(page,details);WidgetIcons none;const auto& art=icons?*icons:none;
+                auto reference=make_card(connected(),size,view,art);
+                expect(str(parse(reference.tmpl),L"type")=="AdaptiveCard","Every page and size is a valid card");
+                for(auto& state:{offline,custom,off,busy,low,Snapshot{}}){
+                    auto card=make_card(state,size,view,art);parse(card.data);
+                    expect(card.tmpl==reference.tmpl,"The template is the same in every speaker state");
+                }
+                auto pending_view=view;pending_view.proposed=chosen.proposed;pending_view.failed_write=true;
+                expect(make_card(busy,size,pending_view,art).tmpl==reference.tmpl,"Clicks and failed writes change data only");
             }
-    auto has=[](const std::string& card,const char* text){return card.find(text)!=std::string::npos;};
-    auto view_of=[](WidgetPage page){WidgetView view;view.page=page;return view;};
-    expect(has(make_card(offline,WidgetSize::Medium),"\"retry\""),"A refused control channel offers Retry");
-    expect(!has(make_card(connected(),WidgetSize::Medium),"\"retry\""),"A healthy connection hides Retry");
-    expect(has(make_card(connected(),WidgetSize::Large),"eq.preset.4"),"Large Home lists presets");
-    for(auto size:{WidgetSize::Medium,WidgetSize::Large})
-        expect(!has(make_card(connected(),size),"media.")&&!has(make_card(connected(),size),"volume."),"Playback and volume buttons are gone");
+
+    expect(data(offline).GetNamedBoolean(L"showRetry")&&!data(connected()).GetNamedBoolean(L"showRetry"),"Retry only after reconnecting gives up");
+    auto large_home=make_card(connected(),WidgetSize::Large).tmpl;
+    expect(has(large_home,"eq.preset.4")&&!has(large_home,"media.")&&!has(large_home,"volume."),"Large Home lists presets and has no playback buttons");
 
     // Speaker switched off: one calm state, no Retry, and the same wording on every page.
-    Snapshot off=connected();off.ready=off.fresh=false;off.status="Not connected";
     expect(status_label(off)=="Disconnected"&&status_label(offline)=="Controls unavailable"&&status_label(connected())=="Connected","Status wording");
-    for(auto page:{WidgetPage::Home,WidgetPage::Diagnostics}){
-        auto card=make_card(off,WidgetSize::Medium,view_of(page));
-        expect(has(card,"Disconnected")&&!has(card,"Controls unavailable")&&!has(card,"\"retry\""),"Every page says Disconnected without Retry");
-    }
+    auto d=data(off);
+    expect(str(d,L"status")=="Disconnected"&&str(data(off,WidgetPage::Diagnostics),L"connection")=="Disconnected"&&!d.GetNamedBoolean(L"showRetry"),"Disconnected without Retry");
+    expect(str(data(connected()),L"status").empty()&&str(data(connected(),WidgetPage::Diagnostics),L"connection")=="Connected","Healthy Home shows no status");
     // Last-known values are labelled, and speaker settings are not shown as current.
-    expect(has(make_card(off,WidgetSize::Large),"Last: XBass")&&has(make_card(off,WidgetSize::Medium),"XBass, last used")&&!has(make_card(off,WidgetSize::Medium),"Disconnected · "),"Home labels the last-known preset; status has no time");
-    auto prompts_off=make_card(off,WidgetSize::Medium,view_of(WidgetPage::Prompts));
-    expect(has(prompts_off,"\"--\"")&&!has(prompts_off,"\"On\""),"Voice prompts show -- while disconnected");
-    // The status sits in the Battery row, so Home has the same number of rows in every state.
-    auto rows=[](const std::string& card){return JsonObject::Parse(winrt::to_hstring(card)).GetNamedArray(L"body").Size();};
-    for(auto size:{WidgetSize::Medium,WidgetSize::Large})
-        expect(rows(make_card(connected(),size))==rows(make_card(off,size))&&rows(make_card(connected(),size))==rows(make_card(offline,size)),"Home layout does not change with connection state");
+    expect(str(d,L"eqNote")=="Last: XBass"&&str(d.GetNamedObject(L"p1"),L"title")=="XBass, last used"&&data(off,WidgetPage::Home,nullptr,art).GetNamedBoolean(L"hasCurve"),"Last-known preset is labelled");
+    expect(str(data(off,WidgetPage::Home,nullptr,art).GetNamedObject(L"curve"),L"dark")=="dark-1-80","Disconnected keeps the last curve");
+    auto settings=data(off,WidgetPage::More);
+    expect(str(data(off,WidgetPage::Prompts).GetNamedObject(L"q0"),L"value")=="--"&&str(settings.GetNamedObject(L"m1"),L"value")=="--"&&str(settings,L"note")=="Not connected","Speaker settings show -- while disconnected");
+    expect(str(settings.GetNamedObject(L"m2"),L"value")=="Off","App preferences keep their values while disconnected");
+    expect(!data(custom,WidgetPage::Home,nullptr,art).GetNamedBoolean(L"hasCurve")&&str(data(custom),L"eqNote")=="Custom EQ active","Custom EQ hides the curve");
+    expect(str(parse(make_card(connected(),WidgetSize::Large,{},art).data).GetNamedObject(L"curve"),L"dark")=="dark-1-96","Each size gets its own curve height");
+    expect(str(data(low),L"batteryColor")=="Attention"&&str(data(low),L"batteryText")=="12%","Low battery is marked");
     // Medium settings and prompts fit on one page; the Bluetooth link moved to Device.
-    expect(!has(make_card(connected(),WidgetSize::Medium,view_of(WidgetPage::More)),"view.details.next"),"Medium settings fit one page");
-    expect(!has(make_card(connected(),WidgetSize::Medium,view_of(WidgetPage::Prompts)),"view.details.next"),"Medium prompts fit one page");
-    auto device=make_card(connected(),WidgetSize::Large,view_of(WidgetPage::Diagnostics));
-    expect(has(device,"open.bluetooth")&&!has(device,"Last seen Last"),"Device links Bluetooth settings without repeated wording");
+    expect(!has(make_card(connected(),WidgetSize::Medium,view_of(WidgetPage::More)).tmpl,"view.details.next"),"Medium settings fit one page");
+    expect(!has(make_card(connected(),WidgetSize::Medium,view_of(WidgetPage::Prompts)).tmpl,"view.details.next"),"Medium prompts fit one page");
+    expect(has(make_card(connected(),WidgetSize::Large,view_of(WidgetPage::Diagnostics)).tmpl,"open.bluetooth")&&str(data(connected(),WidgetPage::Diagnostics),L"lastSeen").find("Last")==std::string::npos,"Device links Bluetooth settings without repeated wording");
+    expect(data(offline,WidgetPage::Diagnostics).GetNamedBoolean(L"hasError")&&!data(connected(),WidgetPage::Diagnostics).GetNamedBoolean(L"hasError"),"Diagnostic row only with an error");
 
     auto s=connected();
     expect(!setting_command(s,L"eq.preset.1"),"Selecting the active preset does nothing");
@@ -70,20 +86,27 @@ int main(){try{
     expect(navigate_widget(view,L"view.prompts")&&view.page==WidgetPage::Prompts,"Navigate to prompts");
     expect(navigate_widget(view,L"view.details.next")&&view.details_page==1,"Page forward");
     // Medium is an EQ switcher first: all six presets on Home, settings behind one button.
-    auto medium=make_card(connected(),WidgetSize::Medium);
+    auto medium=make_card(connected(),WidgetSize::Medium).tmpl;
     expect(has(medium,"eq.preset.0")&&has(medium,"eq.preset.5")&&has(medium,"view.more")&&!has(medium,"view.eq"),"Medium Home lists every preset");
-    // Only the selected preset is tinted; the rest keep the host's neutral surface.
-    { WidgetIcons tinted;for(int id:kPresetOrder)tinted.fills[id]={"light-"+std::to_string(id),"dark-"+std::to_string(id)};
-      auto card=make_card(connected(),WidgetSize::Medium,{},tinted);
-      expect(has(card,"dark-1")&&!has(card,"dark-0")&&!has(card,"dark-5"),"Only the selected preset takes its colour"); }
+    // Only the selected preset's text takes the accent colour; no images are involved.
+    { auto t=data(connected());
+      expect(str(t.GetNamedObject(L"p1"),L"color")=="Accent"&&str(t.GetNamedObject(L"p0"),L"color")=="Default","Only the selected preset is highlighted");
+      expect(!has(make_card(connected(),WidgetSize::Medium,{},art).tmpl,"backgroundImage"),"Buttons carry no background images"); }
     // A click shows its result before the speaker confirms it.
-    { auto busy=connected();busy.pending=true;WidgetView chosen;chosen.proposed=Command{Operation::Preset,tribit::Rock};
-      expect(has(make_card(busy,WidgetSize::Medium,chosen),"Rock, selected"),"Chosen preset is highlighted at once"); }
+    { auto t=data(busy,WidgetPage::Home,&chosen);
+      expect(str(t.GetNamedObject(L"p4"),L"title")=="Rock, selected"&&str(data(busy,WidgetPage::Home,&chosen,art).GetNamedObject(L"curve"),L"dark")=="dark-4-80","Chosen preset and its curve show at once");
+      // The confirmation must not differ, or it becomes a second update (each one rebuilds the card).
+      auto confirmed=connected();confirmed.preset=tribit::Rock;
+      for(auto page:pages){auto pending_view=view_of(page);pending_view.proposed=chosen.proposed;
+          expect(make_card(busy,WidgetSize::Medium,pending_view,art).data==make_card(confirmed,WidgetSize::Medium,view_of(page),art).data,"A confirmed click sends no second update");}
+      // A background refresh on a working link must not change the card either.
+      auto refreshing=connected();refreshing.pending=true;refreshing.status="Refreshing...";
+      for(auto page:pages)expect(make_card(refreshing,WidgetSize::Medium,view_of(page),art).data==make_card(connected(),WidgetSize::Medium,view_of(page),art).data,"A refresh sends no update"); }
     view.proposed=Command{Operation::Preset,tribit::Rock};
     reconcile_widget(view,offline);
     expect(view.failed_write&&!view.proposed,"An unconfirmed write is reported once it resolves");
     reconcile_widget(view,connected());
     expect(!view.failed_write,"A fresh healthy read clears the failure");
-    std::cout<<"Passed: cards for every page and size, retry visibility, command mapping, navigation.\n";return 0;
+    std::cout<<"Passed: state-independent templates, data for every state, command mapping, navigation.\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}
 catch(const winrt::hresult_error& error){std::cerr<<winrt::to_string(error.message())<<"\n";return 1;}}

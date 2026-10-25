@@ -63,7 +63,7 @@ static std::string icon_data(const std::filesystem::path& path){
     auto bytes=read_file(path);if(bytes.empty())return {};
     return png_uri({reinterpret_cast<const uint8_t*>(bytes.data()),bytes.size()});
 }
-struct WidgetRecord { WidgetSize size=WidgetSize::Medium;bool active{};WidgetView view;std::string last_template; };
+struct WidgetRecord { WidgetSize size=WidgetSize::Medium;bool active{};WidgetView view;std::string last_template,last_data; };
 class App;
 struct WidgetProvider : winrt::implements<WidgetProvider,wp::IWidgetProvider,wp::IWidgetProvider2> {
     App& app;
@@ -86,7 +86,6 @@ public:
     std::map<std::wstring,WidgetRecord> widgets;
     WidgetIcons icons;
     std::filesystem::path assets_path;
-    int battery_key=-2;
     bool artwork_loaded{},artwork_contrast{};
     COLORREF artwork_text{};
     HPOWERNOTIFY power_notification{};
@@ -104,7 +103,9 @@ public:
     ~App(){if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
     void post(std::function<void()> fn){ {std::lock_guard lock(dispatch_mutex);tasks.push_back(std::move(fn));}PostMessageW(dispatcher,AppDispatchMessage,0,0); }
     void dispatch(){std::deque<std::function<void()>> work;{std::lock_guard lock(dispatch_mutex);work.swap(tasks);}for(auto& fn:work){try{fn();}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}catch(const std::exception& e){diagnostic(e.what());}}}
-    void diagnostic(const std::string& text){if(!logging)return;try{auto path=folder/L"diagnostics.log";std::error_code ec;bool reset=std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)>5*1024*1024;std::ofstream out(path,reset?std::ios::trunc:std::ios::app);out<<checked_time(std::time(nullptr))<<" "<<text.substr(0,2048)<<"\n";}catch(...){}}
+    void diagnostic(const std::string& text){if(!logging)return;try{auto path=folder/L"diagnostics.log";std::error_code ec;bool reset=std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)>5*1024*1024;
+        SYSTEMTIME now{};GetLocalTime(&now);char stamp[32]{};std::snprintf(stamp,sizeof stamp,"%02u:%02u:%02u.%03u",now.wHour,now.wMinute,now.wSecond,now.wMilliseconds);
+        std::ofstream out(path,reset?std::ios::trunc:std::ios::app);out<<stamp<<" "<<text.substr(0,2048)<<"\n";}catch(...){}}
     void init(bool show,int page=0) {
         wchar_t module[32768]{};auto count=GetModuleFileNameW(nullptr,module,32768);
         if(count&&count<32768)assets_path=std::filesystem::path(module).parent_path()/L"Public"/L"Icons";
@@ -123,7 +124,10 @@ public:
     }
     void interest(){bool active=editor!=nullptr;for(auto& [id,widget]:widgets)active|=widget.active;controller->interest(active);}
     void recover(){
-        try{for(auto info:wp::WidgetManager::GetDefault().GetWidgetInfos()){auto context=info.WidgetContext();widgets[std::wstring(context.Id())].size=context.Size();}update_widgets(true);}
+        // The board keeps the last card across provider restarts; start from it so an unchanged card is not resent.
+        try{for(auto info:wp::WidgetManager::GetDefault().GetWidgetInfos()){auto context=info.WidgetContext();auto& record=widgets[std::wstring(context.Id())];
+                record.size=context.Size();record.last_template=winrt::to_string(info.Template());record.last_data=winrt::to_string(info.Data());}
+            update_widgets(true);}
         catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}
     }
     void artwork(const Snapshot& state){
@@ -132,11 +136,31 @@ public:
         if(!artwork_loaded||artwork_contrast!=high||artwork_text!=foreground){
             bool white=GetRValue(foreground)+GetGValue(foreground)+GetBValue(foreground)>384;
             load_artwork(icons,[&](const std::string& file){return icon_data(assets_path/file);},high,white);
-            artwork_loaded=true;artwork_contrast=high;artwork_text=foreground;battery_key=-2;
+            artwork_loaded=true;artwork_contrast=high;artwork_text=foreground;
         }
-        if(state.battery!=battery_key){load_battery(icons,state.battery,high);battery_key=state.battery;}
     }
-    void update_widgets(bool force=false){auto s=controller->snapshot();artwork(s);for(auto& [id,record]:widgets){reconcile_widget(record.view,s);if(!force&&!record.active)continue;try{auto card=make_card(s,record.size,record.view,icons,logging);if(!force&&card==record.last_template)continue;wp::WidgetUpdateRequestOptions update(id);update.Template(winrt::to_hstring(card));update.Data(L"{}");wp::WidgetManager::GetDefault().UpdateWidget(update);record.last_template=std::move(card);}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}}}
+    // State changes send data only; the template (and with it every image) is resent only when
+    // the page, size or artwork changes. Resending it rebuilt the card and made it flash.
+    // `force` also updates widgets the board has not activated.
+    void update_widgets(bool force=false){
+        auto s=controller->snapshot();artwork(s);
+        for(auto& [id,record]:widgets){
+            reconcile_widget(record.view,s);if(!force&&!record.active)continue;
+            try{
+                auto card=make_card(s,record.size,record.view,icons,logging);
+                bool new_template=card.tmpl!=record.last_template;
+                if(!new_template&&card.data==record.last_data)continue;
+                wp::WidgetUpdateRequestOptions update(id);
+                if(new_template)update.Template(winrt::to_hstring(card.tmpl));
+                update.Data(winrt::to_hstring(card.data));
+                auto started=Clock::now();
+                wp::WidgetManager::GetDefault().UpdateWidget(update);
+                if(logging)diagnostic(std::string("update ")+(new_template?"template+data ":"data ")+std::to_string(card.tmpl.size()+card.data.size())+" bytes, "+
+                    std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now()-started).count())+" ms");
+                record.last_template=std::move(card.tmpl);record.last_data=std::move(card.data);
+            }catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}
+        }
+    }
     void changed(){
         auto state=controller->snapshot();update_widgets();refresh_editor();
         if(state.checked&&!state.pending)save(state);
@@ -236,7 +260,8 @@ WidgetProvider::WidgetProvider(App& owner):app(owner){++app.references;app.post(
 WidgetProvider::~WidgetProvider(){--app.references;app.post([owner=&app]{owner->maybe_exit();});}
 void WidgetProvider::CreateWidget(wp::WidgetContext context){auto id=std::wstring(context.Id());auto size=context.Size();app.post([owner=&app,id,size]{owner->widgets[id]={size,false};owner->update_widgets();});}
 void WidgetProvider::DeleteWidget(winrt::hstring const& id,winrt::hstring const&){app.post([owner=&app,id=std::wstring(id)]{owner->widgets.erase(id);owner->interest();});}
-void WidgetProvider::OnActionInvoked(wp::WidgetActionInvokedArgs args){auto id=std::wstring(args.WidgetContext().Id());auto verb=std::wstring(args.Verb());app.post([owner=&app,id,verb]{owner->action(id,verb);});}
+void WidgetProvider::OnActionInvoked(wp::WidgetActionInvokedArgs args){auto id=std::wstring(args.WidgetContext().Id());auto verb=std::wstring(args.Verb());
+    app.post([owner=&app,id,verb]{owner->diagnostic("click "+winrt::to_string(verb));owner->action(id,verb);});}
 void WidgetProvider::OnWidgetContextChanged(wp::WidgetContextChangedArgs args){auto context=args.WidgetContext();auto id=std::wstring(context.Id());auto size=context.Size();app.post([owner=&app,id,size]{owner->widgets[id].size=size;owner->update_widgets();});}
 void WidgetProvider::OnCustomizationRequested(wp::WidgetCustomizationRequestedArgs args){auto context=args.WidgetContext();auto id=std::wstring(context.Id());auto size=context.Size();app.post([owner=&app,id,size]{auto& widget=owner->widgets[id];widget.size=size;widget.active=true;widget.view.page=WidgetPage::More;widget.view.details_page=0;owner->interest();owner->update_widgets();});}
 void WidgetProvider::Activate(wp::WidgetContext context){auto id=std::wstring(context.Id());auto size=context.Size();app.post([owner=&app,id,size]{auto& widget=owner->widgets[id];widget.size=size;widget.active=true;owner->interest();owner->update_widgets();});}

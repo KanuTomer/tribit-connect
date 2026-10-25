@@ -16,9 +16,7 @@ struct WidgetView {
 };
 struct WidgetIcons {
     std::map<std::string,std::pair<std::string,std::string>> symbols;
-    std::pair<std::string,std::string> battery;
     std::map<std::pair<int,int>,std::pair<std::string,std::string>> curves; // (preset id, height) -> light/dark EQ curve
-    std::map<int,std::pair<std::string,std::string>> fills;                 // preset id -> light/dark selected fill
 };
 static bool battery_low(int value){return value>=0&&value<=20;}
 static bool navigate_widget(WidgetView& view,std::wstring_view verb) {

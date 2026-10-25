@@ -4,12 +4,11 @@ Windows controls for the Tribit XSound Plus 2 speaker, modelled on
 [Sound Connect](https://github.com/KanuTomer/Sound-Connect). Independent project;
 not affiliated with Tribit or Microsoft. MIT licensed.
 
-Status: early development build. A Win + W widget (small, medium and large) and a
+Status: early development build. A Win + W widget (medium and large) and a
 companion app, plus a protocol probe.
 
 - Battery, connection state and the six EQ presets (XBass Off, XBass, MaxSound
-  traditional, Rock, Audiobook, Jazz).
-- Playback and volume buttons that send the Windows media keys.
+  traditional, Rock, Audiobook, Jazz), with each preset's EQ curve.
 - Voice prompt beeps, auto shutdown and the EQ button's light-to-preset mapping
   (companion app). Every change counts only once the speaker reports it back.
 - Not yet: the custom EQ editor, the shutdown countdown, and shutdown, factory reset
@@ -18,6 +17,19 @@ companion app, plus a protocol probe.
 The speaker accepts one control connection at a time. While the widget or companion
 app holds it, the Tribit app on your phone cannot connect; turn on release in
 Settings or close the controls first.
+
+## Install a release
+
+Microsoft.WindowsAppRuntime.2 2.5.1 or newer and the Windows Web Experience Pack
+(Widgets) are required.
+The package is self-signed, so trust its certificate once:
+
+1. Download `TribitConnect_<version>.msix` and `TribitConnect.Local.cer` from
+   [Releases](https://github.com/KanuTomer/tribit-widget/releases).
+2. Open an administrator PowerShell in the download folder and run
+   `Import-Certificate -FilePath TribitConnect.Local.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople`.
+3. Open the `.msix` file and select **Install**.
+4. Add **XSound Plus 2** from Win + W > Add widgets.
 
 ## Install for development
 
@@ -46,7 +58,8 @@ final result on the board with `package.ps1 -Register`.
 
 The speaker is controlled over Bluetooth Classic RFCOMM channel 3 with a small
 checksummed frame format, decoded from an Android HCI snoop capture of the Tribit
-app. See [PROTOCOL.md](PROTOCOL.md). Open questions: the countdown-to-shutdown
+app. See [PROTOCOL.md](PROTOCOL.md). The scrubbed capture is in
+[captures/](captures/), so you can check the decoding or continue it. Open questions: the countdown-to-shutdown
 write, and the custom EQ band frequencies and limits.
 
 ## Probe

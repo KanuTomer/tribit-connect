@@ -1,0 +1,106 @@
+# Tribit RFCOMM frames from hci_snoop20261025005628.cfa
+# seconds  direction  frame
+    0.000  phone->speaker  08 ee 00 00 00 01 02 0a 00 03
+    0.050  phone->speaker  08 ee 00 00 00 01 06 0a 00 07
+    0.062  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+    0.066  phone->speaker  08 ee 00 00 00 01 06 0a 00 07 08 ee 00 00 00 01 06 0a 00 07
+    0.074  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+    0.082  phone->speaker  08 ee 00 00 00 01 08 0a 00 09
+    0.123  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+    0.145  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+    0.146  speaker->phone  09 ff 00 00 01 01 08 0b 00 00 1d
+    2.402  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+    2.413  speaker->phone  09 ff 00 00 01 01 09 0b 00 08 26
+    4.227  phone->speaker  08 ee 00 00 00 01 02 0a 00 03
+    4.278  phone->speaker  08 ee 00 00 00 01 06 0a 00 07
+    4.283  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+    4.316  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+    4.321  phone->speaker  08 ee 00 00 00 01 09 0a 00 0a
+    4.372  phone->speaker  08 ee 00 00 00 01 08 0a 00 09
+    4.375  speaker->phone  09 ff 00 00 01 01 09 0b 00 08 26
+    4.433  speaker->phone  09 ff 00 00 01 01 08 0b 00 00 1d
+   16.175  phone->speaker  08 ee 00 00 00 01 05 0a 00 06
+   16.227  speaker->phone  09 ff 00 00 01 01 05 14 00 fe 08 08 08 08 08 08 08 08 0a 6b
+   16.268  phone->speaker  08 ee 00 00 00 01 05 0a 00 06
+   16.319  speaker->phone  09 ff 00 00 01 01 05 14 00 fe 08 08 08 08 08 08 08 08 0a 6b
+   19.664  phone->speaker  08 ee 00 00 00 01 82 14 00 00 00 00 00 00 00 00 00 00 00 8d
+   19.789  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+   35.008  phone->speaker  08 ee 00 00 00 01 82 14 00 01 00 00 00 00 00 00 00 00 00 8e
+   35.105  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+   48.191  phone->speaker  08 ee 00 00 00 01 82 14 00 03 00 00 00 00 00 00 00 00 00 90
+   48.278  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+   64.429  phone->speaker  08 ee 00 00 00 01 82 14 00 04 00 00 00 00 00 00 00 00 00 91
+   64.522  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+   76.009  phone->speaker  08 ee 00 00 00 01 82 14 00 02 00 00 00 00 00 00 00 00 00 8f
+   76.048  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+   85.891  phone->speaker  08 ee 00 00 00 01 82 14 00 05 00 00 00 00 00 00 00 00 00 92
+   85.938  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+  111.109  phone->speaker  08 ee 00 00 00 01 82 14 00 fe 08 08 08 08 08 08 08 08 08 d3
+  111.150  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+  118.560  phone->speaker  08 ee 00 00 00 01 82 14 00 fe 0b 08 08 08 08 08 08 08 08 d6
+  118.643  speaker->phone  09 ff 00 00 01 01 82 0a 00 96
+  130.076  phone->speaker  08 ee 00 00 00 01 05 0a 00 06
+  130.131  speaker->phone  09 ff 00 00 01 01 05 14 00 fe 0b 08 08 08 08 08 08 08 08 6c
+  130.346  phone->speaker  08 ee 00 00 00 01 02 0a 00 03
+  130.423  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+  130.438  phone->speaker  08 ee 00 00 00 01 06 0a 00 07
+  130.525  phone->speaker  08 ee 00 00 00 01 09 0a 00 0a
+  130.530  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+  130.545  speaker->phone  09 ff 00 00 01 01 09 0b 00 08 26
+  130.602  phone->speaker  08 ee 00 00 00 01 08 0a 00 09
+  130.645  speaker->phone  09 ff 00 00 01 01 08 0b 00 00 1d
+  138.217  phone->speaker  08 ee 00 00 00 01 02 0a 00 03
+  138.271  phone->speaker  08 ee 00 00 00 01 06 0a 00 07
+  138.293  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+  138.305  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+  138.339  phone->speaker  08 ee 00 00 00 01 11 0a 00 12
+  138.361  speaker->phone  09 ff 00 00 01 01 11 0d 00 ff ff 01 27
+  138.389  phone->speaker  08 ee 00 00 00 01 91 0a 00 92
+  138.423  speaker->phone  09 ff 00 00 01 01 91 0f 00 01 01 01 01 00 ae
+  150.355  phone->speaker  08 ee 00 00 00 01 8c 0b 00 00 8e
+  150.425  speaker->phone  09 ff 00 00 01 01 8c 0a 00 a0
+  163.164  phone->speaker  08 ee 00 00 00 01 8c 0b 00 01 8f
+  163.243  speaker->phone  09 ff 00 00 01 01 8c 0a 00 a0
+  183.945  phone->speaker  08 ee 00 00 00 01 90 0f 00 01 01 01 01 00 9a
+  183.949  phone->speaker  08 ee 00 00 00 01 91 0a 00 92
+  183.996  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  183.998  speaker->phone  09 ff 00 00 01 01 91 0f 00 01 01 01 01 00 ae
+  187.581  phone->speaker  08 ee 00 00 00 01 90 0f 00 00 01 01 01 00 99
+  187.629  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  196.708  phone->speaker  08 ee 00 00 00 01 90 0f 00 00 00 01 01 00 98
+  196.786  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  214.025  phone->speaker  08 ee 00 00 00 01 90 0f 00 00 00 00 01 00 97
+  214.058  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  230.267  phone->speaker  08 ee 00 00 00 01 90 0f 00 00 00 00 00 00 96
+  230.338  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  253.795  phone->speaker  08 ee 00 00 00 01 90 0f 00 01 01 01 01 01 9b 08 ee 00 00 00 01 90 0f 00 01 01 01 01 01 9b
+  253.826  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  253.828  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  259.188  phone->speaker  08 ee 00 00 00 01 90 0f 00 01 01 01 01 00 9a
+  259.278  speaker->phone  09 ff 00 00 01 01 90 0a 00 a4
+  267.856  phone->speaker  08 ee 00 00 00 01 05 0a 00 06
+  267.907  speaker->phone  09 ff 00 00 01 01 05 14 00 fe 0b 08 08 08 08 08 08 08 08 6c
+  267.939  phone->speaker  08 ee 00 00 00 01 02 0a 00 03
+  267.987  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+  268.018  phone->speaker  08 ee 00 00 00 01 06 0a 00 07
+  268.024  phone->speaker  08 ee 00 00 00 01 02 0a 00 03
+  268.038  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+  268.057  phone->speaker  08 ee 00 00 00 01 09 0a 00 0a
+  268.075  phone->speaker  08 ee 00 00 00 01 11 0a 00 12
+  268.087  speaker->phone  09 ff 00 00 01 01 02 0b 00 64 7b
+  268.088  phone->speaker  08 ee 00 00 00 01 06 0a 00 07
+  268.121  phone->speaker  08 ee 00 00 00 01 08 0a 00 09
+  268.132  phone->speaker  08 ee 00 00 00 01 91 0a 00 92
+  268.145  speaker->phone  09 ff 00 00 01 01 09 0b 00 08 26
+  268.148  speaker->phone  09 ff 00 00 01 01 11 0d 00 ff ff 01 27
+  268.150  speaker->phone  09 ff 00 00 01 01 06 10 00 18 0b 16 00 03 01 5d
+  268.199  speaker->phone  09 ff 00 00 01 01 08 0b 00 00 1d
+  268.201  speaker->phone  09 ff 00 00 01 01 91 0f 00 01 01 01 01 00 ae
+  271.220  phone->speaker  08 ee 00 00 00 01 19 0a 00 1a
+  271.309  speaker->phone  09 ff 00 00 01 01 19 16 00 03 00 00 00 00 00 00 00 00 00 00 00 3c
+  271.473  speaker->phone  09 ff 00 00 01 01 19 16 00 03 01 01 00 00 00 00 00 00 00 00 00 3e
+  271.640  speaker->phone  09 ff 00 00 01 01 19 16 00 03 02 04 00 00 00 00 00 00 00 00 00 42
+  290.045  phone->speaker  08 ee 00 00 00 01 18 16 00 03 00 00 00 00 00 00 00 00 00 00 00 28 08 ee 00 00 00 01 18 16 00 03 01 01 00 00 00 00 00 00 00 00 00 2a 08 ee 00 00 00 01 18 16 00 03 02 03 00 00 00 00 00 00 00 00 00 2d
+  290.142  speaker->phone  09 ff 00 00 01 01 18 0a 00 2c
+  290.144  speaker->phone  09 ff 00 00 01 01 18 0a 00 2c
+  290.145  speaker->phone  09 ff 00 00 01 01 18 0a 00 2c

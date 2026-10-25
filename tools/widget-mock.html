@@ -71,9 +71,23 @@ function cardFor(size){
   for(let d=w.detail;d>=0;d--){const card=MOCK_CARDS[[stateKey(),size,w.page,d].join("|")];if(card){w.detail=d;return card;}}
   w.page="home";w.detail=0;return MOCK_CARDS[[stateKey(),size,"home",0].join("|")];
 }
-// The provider sends `${$host.hostTheme == 'dark' ? 'dark url' : 'light url'}`; resolve it like the host does.
-function resolveTheme(card){
-  return JSON.parse(JSON.stringify(card).replace(/\$\{\$host\.hostTheme == 'dark' \? '([^']*)' : '([^']*)'\}/g,(m,dark,light)=>view.theme==="dark"?dark:light));
+// Applies the provider's data to its template the way the host's templating does, for the
+// expressions this card uses: field paths, ==, <, and the $host.hostTheme ternary.
+// A string that is one whole ${...} keeps the value's type (booleans, numbers).
+function expand(template,data){
+  const host={hostTheme:view.theme};
+  const evaluate=expr=>new Function("d","host","with(d){return ("+expr.replace(/\$host\./g,"host.")+");}")(data,host);
+  const walk=value=>{
+    if(typeof value==="string"){
+      const whole=value.match(/^\$\{([^}]*)\}$/);
+      if(whole)return evaluate(whole[1]);
+      return value.replace(/\$\{([^}]*)\}/g,(m,expr)=>String(evaluate(expr)));
+    }
+    if(Array.isArray(value))return value.map(walk);
+    if(value&&typeof value==="object"){const out={};for(const k in value)out[k]=walk(value[k]);return out;}
+    return value;
+  };
+  return walk(template);
 }
 function hostConfig(){
   const dark=view.theme==="dark";
@@ -86,7 +100,9 @@ function hostConfig(){
     fontSizes:{small:12,default:14,medium:20,large:24,extraLarge:28},fontWeights:{lighter:300,default:400,bolder:600},
     lineHeights:{small:16,default:20,medium:26,large:32,extraLarge:36},
     // The renderer reads 8-digit colours as #AARRGGBB.
-    containerStyles:{default:{backgroundColor:"#00000000",foregroundColors:colors},emphasis:{backgroundColor:dark?"#0FFFFFFF":"#08000000",foregroundColors:colors}},
+    containerStyles:{default:{backgroundColor:"#00000000",foregroundColors:colors},emphasis:{backgroundColor:dark?"#0FFFFFFF":"#08000000",foregroundColors:colors},
+      accent:{backgroundColor:dark?"#FF0078D4":"#FFCCE4F7",foregroundColors:colors},good:{backgroundColor:dark?"#FF6CCB5F":"#FF0F7B0F",foregroundColors:colors},
+      attention:{backgroundColor:dark?"#FFFF99A4":"#FFC42B1C",foregroundColors:colors}},
     imageSizes:{small:40,medium:80,large:160},actions:{maxActions:5,showCard:{actionMode:"inline"}}
   });
 }
@@ -118,7 +134,7 @@ function render(){
     const body=frame.querySelector(".body");
     const card=new AdaptiveCards.AdaptiveCard();card.hostConfig=hostConfig();
     card.onExecuteAction=a=>act(size,a);
-    card.parse(resolveTheme(cardFor(size)));
+    const entry=cardFor(size);card.parse(expand(entry.t,entry.d));
     const element=card.render();body.appendChild(element);
     fig.append(cap,frame);board.appendChild(fig);
     // The board clips anything taller than the widget; say so instead of hiding it silently.

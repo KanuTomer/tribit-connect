@@ -29,10 +29,7 @@ struct ArtFiles{
     }
     void apply(WidgetIcons& icons){
         for(auto& [key,urls]:icons.symbols){urls.first=(*this)(urls.first);urls.second=(*this)(urls.second);}
-        for(auto& [key,urls]:icons.curves){urls.first=(*this)(urls.first);urls.second=(*this)(urls.second);}
-        for(auto& [key,urls]:icons.fills){urls.first=(*this)(urls.first);urls.second=(*this)(urls.second);}
-        icons.battery={(*this)(icons.battery.first),(*this)(icons.battery.second)};
-    }
+        for(auto& [key,urls]:icons.curves){urls.first=(*this)(urls.first);urls.second=(*this)(urls.second);}    }
 };
 
 int main(int argc,char** argv){try{
@@ -42,7 +39,7 @@ int main(int argc,char** argv){try{
     ArtFiles art{out};
     WidgetIcons base;load_artwork(base,[](const std::string& file){return "icons/"+file;},false,true);art.apply(base);
 
-    Snapshot connected;connected.ready=connected.fresh=true;connected.status="Connected";connected.firmware="0.3.1";connected.address="F4:4E:FC:C3:DD:50";
+    Snapshot connected;connected.ready=connected.fresh=true;connected.status="Connected";connected.firmware="0.3.1";connected.address="00:11:22:33:44:55";
     connected.battery=90;connected.preset=tribit::XBass;connected.prompts={1,1,1,1,0};connected.auto_shutdown=1;connected.buttons={0,1,3};connected.checked=1761341700;
     std::vector<std::pair<std::string,Snapshot>> states;
     for(auto id:kPresetOrder){auto s=connected;s.preset=id;states.emplace_back("connected-"+std::to_string(id),s);}
@@ -61,15 +58,16 @@ int main(int argc,char** argv){try{
     js<<"window.MOCK_CARDS={";
     size_t count=0;
     for(auto& [state_name,state]:states){
-        auto icons=base;load_battery(icons,state.battery,false);art.apply(icons);
+        auto icons=base;
         for(auto& [size_name,size]:sizes)for(auto& [page_name,page]:pages){
             std::string previous;
             for(int detail=0;detail<6;++detail){
                 WidgetView view;view.page=page;view.details_page=detail;
+                // Template and data are kept apart, as the provider sends them.
                 auto card=make_card(state,size,view,icons,false);
-                if(card==previous)break; // past the last page
-                js<<(count++?",\n":"\n")<<::quoted(state_name+"|"+size_name+"|"+page_name+"|"+std::to_string(detail))<<":"<<card;
-                previous=std::move(card);
+                if(card.tmpl==previous)break; // past the last page
+                js<<(count++?",\n":"\n")<<::quoted(state_name+"|"+size_name+"|"+page_name+"|"+std::to_string(detail))<<":{\"t\":"<<card.tmpl<<",\"d\":"<<card.data<<"}";
+                previous=std::move(card.tmpl);
             }
         }
     }

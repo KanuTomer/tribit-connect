@@ -15,12 +15,4 @@ static void load_artwork(WidgetIcons& icons,const std::function<std::string(cons
     }
     icons.curves.clear();
     for(auto& curve:kPresetCurves)for(int height:kCurveHeights)
-        icons.curves[{curve.preset,height}]={curve_image(curve,false,high,268,height),curve_image(curve,true,high,268,height)};
-    // High contrast keeps the host's own surfaces, which follow the system colours.
-    icons.fills.clear();
-    if(!high)for(auto& [preset,color]:kPresetTileColors)
-        icons.fills[preset]={preset_fill(color,false),preset_fill(color,true)};
-}
-static void load_battery(WidgetIcons& icons,int value,bool high){
-    icons.battery={battery_meter(value,false,high),battery_meter(value,true,high)};
-}
+        icons.curves[{curve.preset,height}]={curve_image(curve,false,high,268,height),curve_image(curve,true,high,268,height)};}
