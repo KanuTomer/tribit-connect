@@ -6,6 +6,8 @@
 #include "widget_card.hpp"
 #include "widget_artwork.hpp"
 #include "native_editor.hpp"
+#include "webview_host.hpp"
+#include "spectrum.hpp"
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Microsoft.Windows.Widgets.Providers.h>
@@ -85,6 +87,7 @@ public:
     std::atomic<int> references{};
     std::map<std::wstring,WidgetRecord> widgets;
     WidgetIcons icons;
+    WidgetSlots widget_slots=default_slots();     // the Home page's six buttons, chosen in Sound Lab
     std::filesystem::path assets_path;
     bool artwork_loaded{},artwork_contrast{};
     COLORREF artwork_text{};
@@ -98,9 +101,14 @@ public:
     HANDLE stop_pipe=CreateEventW(nullptr,TRUE,FALSE,nullptr);
     std::thread pipe_thread;
     std::wstring pipe_name;
-    std::unique_ptr<NativeEditor> native;
+    std::unique_ptr<NativeEditor> native;          // fallback when WebView2 is unavailable
+    std::unique_ptr<WebViewHost> web;               // the Sound Lab window
+    Spectrum spectrum;                              // what this PC plays through the speaker, while the window is open
+    HWND dialog{};                                  // native window that needs dialog keyboard handling
+    bool web_failed{};
+    std::deque<std::pair<Command,Clock::time_point>> waiting; // page writes held while a refresh runs
     App():folder(data_folder()){}
-    ~App(){if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
+    ~App(){spectrum.stop();web.reset();if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
     void post(std::function<void()> fn){ {std::lock_guard lock(dispatch_mutex);tasks.push_back(std::move(fn));}PostMessageW(dispatcher,AppDispatchMessage,0,0); }
     void dispatch(){std::deque<std::function<void()>> work;{std::lock_guard lock(dispatch_mutex);work.swap(tasks);}for(auto& fn:work){try{fn();}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}catch(const std::exception& e){diagnostic(e.what());}}}
     void diagnostic(const std::string& text){if(!logging)return;try{auto path=folder/L"diagnostics.log";std::error_code ec;bool reset=std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)>5*1024*1024;
@@ -113,8 +121,11 @@ public:
         RegisterClassW(&wc);dispatcher=CreateWindowExW(0,wc.lpszClassName,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,this);
         if(!dispatcher)winrt::throw_last_error();
         auto initial=load_cache(folder/L"state.json",logging);
+        load_widget_slots(read_library());
         std::filesystem::create_directories(folder);
         controller=std::make_unique<Controller>([this]{PostMessageW(dispatcher,StateMessage,0,0);},std::move(initial));
+        // Results reach the page after the state they produced (both travel through the dispatcher).
+        controller->on_result=[this](int id,bool ok,const std::string& error){post([this,id,ok,error]{web_result(id,ok,error);});};
         power_notification=RegisterSuspendResumeNotification(dispatcher,DEVICE_NOTIFY_WINDOW_HANDLE);
         DEV_BROADCAST_DEVICEINTERFACE_W filter{};filter.dbcc_size=sizeof(filter);filter.dbcc_devicetype=DBT_DEVTYP_DEVICEINTERFACE;filter.dbcc_classguid=GUID_BTHPORT_DEVICE_INTERFACE;
         interface_notification=RegisterDeviceNotificationW(dispatcher,&filter,DEVICE_NOTIFY_WINDOW_HANDLE);
@@ -144,10 +155,13 @@ public:
     // `force` also updates widgets the board has not activated.
     void update_widgets(bool force=false){
         auto s=controller->snapshot();artwork(s);
+        // Saved curves are drawn on demand: the six buttons' and whatever custom curve plays.
+        for(auto& slot:widget_slots)if(slot.preset==tribit::Custom)custom_artwork(icons,slot.bands,artwork_contrast);
+        if(s.preset==tribit::Custom)custom_artwork(icons,s.bands,artwork_contrast);
         for(auto& [id,record]:widgets){
             reconcile_widget(record.view,s);if(!force&&!record.active)continue;
             try{
-                auto card=make_card(s,record.size,record.view,icons,logging);
+                auto card=make_card(s,record.size,record.view,icons,logging,widget_slots);
                 bool new_template=card.tmpl!=record.last_template;
                 if(!new_template&&card.data==record.last_data)continue;
                 wp::WidgetUpdateRequestOptions update(id);
@@ -162,7 +176,7 @@ public:
         }
     }
     void changed(){
-        auto state=controller->snapshot();update_widgets();refresh_editor();
+        auto state=controller->snapshot();update_widgets();flush_waiting();refresh_editor();
         if(state.checked&&!state.pending)save(state);
         if(!state.error.empty())diagnostic(state.error);
         maybe_exit();
@@ -186,7 +200,7 @@ public:
         auto& view=widget->second.view;
         if(navigate_widget(view,verb)){update_widgets();return;}
         auto state=controller->snapshot();
-        if(auto command=setting_command(state,verb)){
+        if(auto command=setting_command(state,verb,widget_slots)){
             if(controller->send(*command)){view.proposed=*command;view.failed_write=false;update_widgets();}
             return;
         }
@@ -197,13 +211,162 @@ public:
     }
     void open(int page){
         editor_started=true;
+        if(web&&web->window){web->show();return;}
         if(native&&native->window){native->show(page);return;}
-        native=std::make_unique<NativeEditor>([this]{return controller->snapshot();},[this](Command command){return controller->send(std::move(command));},
-            [this]{editor=nullptr;interest();post([this]{if(native&&!native->window)native.reset();maybe_exit();});},
-            [this]{return logging;},[this](bool enabled){logging=enabled;save(controller->snapshot());},[this](bool enabled){release(enabled);});
-        editor=native->window;native->show(page);interest();
+        if(!web_failed){try{open_web();return;}catch(const std::exception& e){diagnostic(e.what());web_failed=true;}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));web_failed=true;}}
+        open_native(page);
     }
-    void refresh_editor(){if(native)native->refresh();}
+    void open_native(int page){
+        native=std::make_unique<NativeEditor>([this]{return controller->snapshot();},[this](Command command){return controller->send(std::move(command));},
+            [this]{editor=dialog=nullptr;interest();post([this]{if(native&&!native->window)native.reset();maybe_exit();});},
+            [this]{return logging;},[this](bool enabled){logging=enabled;save(controller->snapshot());},[this](bool enabled){release(enabled);});
+        editor=dialog=native->window;native->show(page);interest();
+    }
+    // ---- Sound Lab (WebView2) ----------------------------------------------------------------
+    void open_web(){
+        wchar_t module[32768]{};auto count=GetModuleFileNameW(nullptr,module,32768);
+        auto content=std::filesystem::path(std::wstring(module,count)).parent_path()/L"app";
+        if(!std::filesystem::exists(content/L"index.html"))throw std::runtime_error("The Sound Lab files are missing from the package.");
+        // The page's last theme, so the window does not flash the other colour before it paints.
+        std::string theme;{std::ifstream in(folder/L"theme",std::ios::binary);std::getline(in,theme);}
+        web=std::make_unique<WebViewHost>(content,folder/L"WebView2",theme=="dark");
+        web->on_message=[this](const std::wstring& text){web_message(text);};
+        web->on_closed=[this]{spectrum.stop();editor=nullptr;waiting.clear();interest();post([this]{if(web&&!web->window)web.reset();maybe_exit();});};
+        // No WebView2 runtime (or it failed to start): use the native window instead.
+        web->on_failed=[this](HRESULT hr){diagnostic("WebView2 unavailable: "+winrt::to_string(winrt::hresult_error(hr).message()));
+            post([this]{web_failed=true;bool showing=web&&web->window;web.reset();if(showing)open_native(0);});};
+        spectrum.on_frame=[this](const Spectrum::Levels& levels,bool playing,bool listening){
+            JsonObject m;m.SetNamedValue(L"type",JsonValue::CreateStringValue(L"spectrum"));
+            m.SetNamedValue(L"playing",JsonValue::CreateBooleanValue(playing));m.SetNamedValue(L"listening",JsonValue::CreateBooleanValue(listening));
+            JsonArray bands;for(float v:levels)bands.Append(JsonValue::CreateNumberValue(std::round(v*100)/100));m.SetNamedValue(L"bands",bands);
+            auto json=std::wstring(m.Stringify());post([this,json]{if(web&&web->window)web->post(json);});
+        };
+        spectrum.start();
+        editor=web->window;web->show();interest();
+    }
+    void refresh_editor(){if(native)native->refresh();if(web&&web->window)web->post(state_json());}
+    std::filesystem::path library_path()const{return folder/L"profiles.json";}
+    static bool read_bands(const JsonObject& o,Bands& out){
+        if(!o.HasKey(L"bands"))return false;auto a=o.GetNamedArray(L"bands");if(a.Size()!=out.size())return false;
+        for(uint32_t i=0;i<a.Size();++i)out[i]=static_cast<int>(a.GetNumberAt(i));
+        return true;
+    }
+    // Everything the page shows, in the same shape the browser mock sends.
+    std::wstring state_json(){
+        auto s=controller->snapshot();const bool connected=s.ready&&s.fresh;
+        std::wstring status=s.pending&&!connected?L"connecting":connected&&s.pending?L"updating":connected?L"connected":
+            (s.status=="Bluetooth unavailable"||!s.error.empty())?L"unavailable":L"disconnected";
+        JsonObject speaker;
+        speaker.SetNamedValue(L"connected",JsonValue::CreateBooleanValue(connected));
+        speaker.SetNamedValue(L"status",JsonValue::CreateStringValue(status));
+        speaker.SetNamedValue(L"error",JsonValue::CreateStringValue(winrt::to_hstring(s.error)));
+        speaker.SetNamedValue(L"name",JsonValue::CreateStringValue(L"XSound Plus 2"));
+        speaker.SetNamedValue(L"firmware",JsonValue::CreateStringValue(winrt::to_hstring(s.firmware)));
+        speaker.SetNamedValue(L"battery",JsonValue::CreateNumberValue(s.battery));
+        speaker.SetNamedValue(L"preset",s.preset<0?JsonValue::CreateNullValue():JsonValue::CreateNumberValue(s.preset));
+        speaker.SetNamedValue(L"bands",write_array(s.bands));
+        JsonArray buttons;
+        for(size_t i=0;i<s.buttons.size();++i){
+            JsonObject b;
+            b.SetNamedValue(L"preset",s.buttons[i]<0?JsonValue::CreateNullValue():JsonValue::CreateNumberValue(s.buttons[i]));
+            if(s.buttons[i]==tribit::Custom)b.SetNamedValue(L"bands",write_array(s.button_bands[i]));
+            buttons.Append(b);
+        }
+        speaker.SetNamedValue(L"buttons",buttons);
+        speaker.SetNamedValue(L"prompts",write_array(s.prompts));
+        speaker.SetNamedValue(L"autoShutdown",JsonValue::CreateNumberValue(s.auto_shutdown));
+        speaker.SetNamedValue(L"lastSeen",JsonValue::CreateNumberValue(static_cast<double>(s.checked)*1000));
+        JsonObject settings;
+        settings.SetNamedValue(L"release",JsonValue::CreateBooleanValue(s.release_when_hidden));
+        settings.SetNamedValue(L"logging",JsonValue::CreateBooleanValue(logging));
+        JsonObject root;
+        root.SetNamedValue(L"type",JsonValue::CreateStringValue(L"state"));
+        root.SetNamedValue(L"speaker",speaker);root.SetNamedValue(L"settings",settings);
+        root.SetNamedValue(L"library",read_library());
+        return std::wstring(root.Stringify());
+    }
+    JsonValue read_library()const{
+        try{
+            std::error_code ec;auto path=library_path();
+            if(std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)<(1u<<20)){
+                std::ifstream in(path,std::ios::binary);std::string text{std::istreambuf_iterator<char>(in),{}};
+                JsonValue parsed{nullptr};if(JsonValue::TryParse(winrt::to_hstring(text),parsed))return parsed;
+            }
+        }catch(...){}
+        return JsonValue::CreateNullValue();
+    }
+    // Sound Lab saves the widget's buttons with the library, already resolved to names and curves.
+    void load_widget_slots(const JsonValue& library){
+        widget_slots=default_slots();
+        if(library.ValueType()!=JsonValueType::Object)return;
+        auto slots=library.GetObject().GetNamedArray(L"widgetSlots",JsonArray());
+        for(uint32_t i=0;i<std::min<uint32_t>(slots.Size(),static_cast<uint32_t>(widget_slots.size()));++i){
+            if(slots.GetAt(i).ValueType()!=JsonValueType::Object)continue;
+            auto o=slots.GetObjectAt(i);WidgetSlot slot{static_cast<int>(o.GetNamedNumber(L"preset",-1)),{},winrt::to_string(o.GetNamedString(L"name",L""))};
+            if(slot.preset==tribit::Custom){if(!read_bands(o,slot.bands)||std::any_of(slot.bands.begin(),slot.bands.end(),[](int b){return b<-8||b>8;}))continue;}
+            else if(!valid_preset(slot.preset))continue;
+            if(slot.name.empty())slot.name=preset_label(slot.preset);
+            widget_slots[i]=std::move(slot);
+        }
+    }
+    void web_result(int id,bool ok,const std::string& error){
+        if(!id||!web||!web->window)return;
+        JsonObject r;r.SetNamedValue(L"type",JsonValue::CreateStringValue(L"result"));r.SetNamedValue(L"id",JsonValue::CreateNumberValue(id));
+        r.SetNamedValue(L"ok",JsonValue::CreateBooleanValue(ok));r.SetNamedValue(L"error",JsonValue::CreateStringValue(winrt::to_hstring(error)));
+        web->post(std::wstring(r.Stringify()));
+    }
+    // A page write that arrives during a background refresh waits a moment instead of failing.
+    void submit(Command c){
+        if(controller->send(c))return;
+        auto s=controller->snapshot();
+        if(s.ready&&s.fresh&&s.pending&&waiting.size()<8){waiting.push_back({std::move(c),Clock::now()+4s});return;}
+        web_result(c.id,false,s.ready&&s.fresh?"The speaker is busy. Try again.":"The speaker is not connected.");
+    }
+    void flush_waiting(){
+        while(!waiting.empty()){
+            auto& [c,deadline]=waiting.front();
+            if(Clock::now()>deadline){web_result(c.id,false,"The speaker did not respond in time.");waiting.pop_front();continue;}
+            if(!controller->send(c))break;
+            waiting.pop_front();
+        }
+    }
+    void save_library(const std::wstring& json){
+        try{
+            auto temporary=folder/L"profiles.tmp";
+            {std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out<<winrt::to_string(json);if(!out)throw std::runtime_error("Could not save profiles.");}
+            if(!MoveFileExW(temporary.c_str(),library_path().c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))winrt::throw_last_error();
+        }catch(const std::exception& e){diagnostic(e.what());}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}
+    }
+    void web_message(const std::wstring& text){
+        JsonObject m{nullptr};if(!JsonObject::TryParse(text,m))return;
+        const std::wstring type(m.GetNamedString(L"type",L""));const int id=static_cast<int>(m.GetNamedNumber(L"id",0));
+        if(type==L"ready"){web->page_ready();web->post(state_json());return;}
+        if(type==L"window"){web->command(std::wstring(m.GetNamedString(L"action",L"")));return;}
+        if(type==L"apply"){
+            Command c{Operation::Preset};c.id=id;const int preset=static_cast<int>(m.GetNamedNumber(L"preset",-1));
+            if(preset==tribit::Custom){c.operation=Operation::CustomEq;if(!read_bands(m,c.bands)){web_result(id,false,"No bands were given.");return;}}
+            else c.value=preset;
+            submit(std::move(c));return;
+        }
+        if(type==L"assign"){
+            Command c{Operation::Buttons};c.id=id;auto slots=m.GetNamedArray(L"slots",JsonArray());
+            if(slots.Size()!=3){web_result(id,false,"Three lights are needed.");return;}
+            for(uint32_t i=0;i<3;++i){
+                auto slot=slots.GetObjectAt(i);c.buttons[i]=static_cast<int>(slot.GetNamedNumber(L"preset",-1));
+                if(c.buttons[i]==tribit::Custom&&!read_bands(slot,c.button_bands[i])){web_result(id,false,"No bands were given.");return;}
+            }
+            submit(std::move(c));return;
+        }
+        if(type==L"setPrompt"){Command c{Operation::Prompt};c.id=id;c.index=static_cast<int>(m.GetNamedNumber(L"index",-1));c.value=m.GetNamedBoolean(L"value",false)?1:0;submit(std::move(c));return;}
+        if(type==L"setAutoShutdown"){Command c{Operation::AutoShutdown};c.id=id;c.value=m.GetNamedBoolean(L"value",false)?1:0;submit(std::move(c));return;}
+        if(type==L"setRelease"){release(m.GetNamedBoolean(L"value",false));update_widgets();refresh_editor();return;}
+        if(type==L"setLogging"){logging=m.GetNamedBoolean(L"value",false);save(controller->snapshot());update_widgets();refresh_editor();return;}
+        if(type==L"saveLibrary"){if(m.HasKey(L"library")){auto library=m.GetNamedValue(L"library");save_library(std::wstring(library.Stringify()));load_widget_slots(library);update_widgets();}return;}
+        if(type==L"theme"){const bool dark=m.GetNamedBoolean(L"dark",false);web->theme(dark);
+            try{std::ofstream(folder/L"theme",std::ios::binary|std::ios::trunc)<<(dark?"dark":"light");}catch(...){}return;}
+        if(type==L"retry"){controller->send({Operation::Retry});return;}
+        if(type==L"openBluetooth"){ShellExecuteW(nullptr,L"open",L"ms-settings:bluetooth",nullptr,nullptr,SW_SHOWNORMAL);return;}
+    }
     void watch_radios(){
         for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}radio_notifications.clear();
         BLUETOOTH_FIND_RADIO_PARAMS search{sizeof(search)};HANDLE radio{};
@@ -294,7 +457,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR arguments,int){
             App app;app.pipe_name=pipe;app.init(!provider,static_cast<int>(start_page));app.start_pipe(descriptor);
             auto factory=winrt::make<ProviderFactory>(app);DWORD cookie{};
             winrt::check_hresult(CoRegisterClassObject(ProviderClsid,factory.get(),CLSCTX_LOCAL_SERVER,REGCLS_MULTIPLEUSE,&cookie));
-            MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(app.editor&&IsDialogMessageW(app.editor,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}
+            MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(app.dialog&&IsDialogMessageW(app.dialog,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}
             CoRevokeClassObject(cookie);
         }
         LocalFree(descriptor);CloseHandle(mutex);return 0;

@@ -1,0 +1,2 @@
+// The executable's icon, drawn by scripts/draw-logo.ps1 (Save-Ico). Windows ask for icon 1.
+1 ICON "app.ico"

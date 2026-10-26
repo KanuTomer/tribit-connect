@@ -112,14 +112,21 @@ inline std::optional<ButtonSlot> parse_button_slot(std::span<const uint8_t> data
     if(data.size()!=3+kEqBands||data[0]!=0x03||data[1]>=kLightNames.size())return std::nullopt;
     return ButtonSlot{data[1],data[2]};
 }
-// The app sends all three lights as back-to-back frames in one write.
-inline Bytes eq_buttons_write(const std::array<uint8_t,3>& presets){
+// The app sends all three lights as back-to-back frames in one write. Each slot carries
+// nine band bytes after the preset; the app always sends zeros there. Whether a custom
+// slot (preset FE plus bands) is honoured is what tribit-probe --button-slot tests.
+inline Bytes eq_slots_write(const std::array<Eq,3>& slots){
     Bytes out;
-    for(uint8_t light=0;light<presets.size();++light){
-        Bytes data{0x03,light,presets[light]};data.resize(3+kEqBands,0);
+    for(uint8_t light=0;light<slots.size();++light){
+        Bytes data{0x03,light,slots[light].preset};
+        if(slots[light].preset==Custom)data.insert(data.end(),slots[light].bands.begin(),slots[light].bands.end());
+        else data.resize(3+kEqBands,0);
         auto frame=encode(SetEqButtons,data);out.insert(out.end(),frame.begin(),frame.end());
     }
     return out;
+}
+inline Bytes eq_buttons_write(const std::array<uint8_t,3>& presets){
+    return eq_slots_write(std::array<Eq,3>{Eq{presets[0]},Eq{presets[1]},Eq{presets[2]}});
 }
 
 inline std::string hex(std::span<const uint8_t> bytes){

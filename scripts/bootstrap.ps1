@@ -15,6 +15,7 @@ function Get-TaskNugetPackage([string]$Id,[string]$Version,[string]$Folder) {
 }
 Get-TaskNugetPackage 'Microsoft.WindowsAppSDK.Widgets' '2.0.5' 'widgets'
 Get-TaskNugetPackage 'Microsoft.Windows.CppWinRT' '3.0.260818.1' 'cppwinrt'
+Get-TaskNugetPackage 'Microsoft.Web.WebView2' '1.0.4258.31' 'webview2'
 $taskGenerated=Join-Path $taskRoot 'build\generated'
 if(-not(Test-Path -LiteralPath (Join-Path $taskGenerated 'winrt\Microsoft.Windows.Widgets.Providers.h'))){
     & (Join-Path $taskRoot '.deps\nuget\cppwinrt\bin\cppwinrt.exe') -input sdk -input (Join-Path $taskRoot '.deps\nuget\widgets\metadata\Microsoft.Windows.Widgets.winmd') -output $taskGenerated

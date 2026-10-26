@@ -1,0 +1,351 @@
+/* Tribit Connect · Sound Lab
+   An ivory instrument with one dark panel. The drawn speaker sits under three assignment
+   modules, one per light of its EQ button, wired to the button by engraved conduits. The
+   program bank is the only charcoal surface; EDIT unfolds its display into a fader plate.
+   Instrument details (needle meter, segment readouts, engraving, lamp keys) are used where
+   they carry information, not as decoration.
+   Colour has jobs: orange = act / attention, amber = playing / draft, blue · green · red = bands. */
+
+@font-face{font-family:Archivo;src:url(../fonts/archivo-latin-wdth-normal.woff2) format("woff2");font-weight:100 900;font-stretch:62% 125%}
+@font-face{font-family:Doto;src:url(../fonts/doto-latin-800-normal.woff2) format("woff2");font-weight:800}
+@font-face{font-family:Seg;src:url(../fonts/DSEG7Classic-Bold.woff2) format("woff2")}
+
+:root{
+  --ivory:#ece8de;--well:#e2ddd0;--alu:#dedacf;--paper:#faf7ee;--ink:#1c1c1a;--ink-2:#5f5c55;--ink-3:#9a958a;--rule:#cbc5b8;
+  --engrave:#45423b;--panel:#2a2a2c;--key:#f3f0e8;--key-user:#d9d3c5;--key-edge:#b5ae9f;--key-ink:#1c1c1a;
+  --orange:#ff5a14;--orange-edge:#b33a06;--amber:#ffb21a;--lcd:#22271e;--lcd-ink:#d5ecab;--lcd-dim:#58654a;--lcd-ghost:#2f3828;
+  --low:#2f6fe4;--mid:#2f9e5b;--high:#e4572e;--white-light:#f7f8fb;--blue-light:#3d8bff;
+  /* relief: --lip is the lit lower edge of anything cut into the panel, --tlip the same for legends */
+  --lip:#ffffffb0;--tlip:#ffffffb0;--plate-hi:#ffffffd0;--plate-edge:#b8b1a1;--groove:#3f3c35;
+  --mech-a:#f6f3ec;--mech-b:#dcd6c9;--mech-edge:#9d968a;--mech-hi:#fff;
+  --bezel:#b7b0a1;--led-off:#8d877a;--led-ok:#c9c2b2;--win-off:#bdb6a6;--sw-off:#bdb7aa;--meter-edge:#a39b8a;
+  --rule-line:#00000014;--rule-major:#0000003a;--hot:#ffffff59;--hover:#0000000f;--sheet-edge:var(--ink);--divider:#0000002a;
+  --tex:none;
+  --ease:cubic-bezier(.2,.75,.2,1);
+  --fh:clamp(96px,calc((100vh - 452px) * .55),240px);   /* fader travel: about half the free height */
+  color-scheme:light;
+}
+/* Dark: the same instrument in graphite. Keys, lamps, LCDs and band colours keep their jobs. */
+:root[data-theme=dark]{
+  --ivory:#22221f;--well:#1a1a18;--alu:#2b2b28;--paper:#2f2e2a;--ink:#ece8de;--ink-2:#aaa498;--ink-3:#716c62;--rule:#3d3b36;
+  --engrave:#c4beb0;--panel:#131313;--key:#d6d1c5;--key-user:#b1ab9c;--key-edge:#77726a;
+  --lip:#ffffff12;--tlip:#000a;--plate-hi:#ffffff14;--plate-edge:#0d0d0c;--groove:#0b0b0a;
+  --mech-a:#3b3a36;--mech-b:#2d2c29;--mech-edge:#121211;--mech-hi:#ffffff1c;
+  --bezel:#121211;--led-off:#4a4741;--led-ok:#5e5a51;--win-off:#3e3c37;--sw-off:#46443e;--meter-edge:#55524a;
+  --rule-line:#ffffff0c;--rule-major:#ffffff22;--hot:#ffffff0c;--hover:#ffffff14;--sheet-edge:#58554d;--divider:#0008;
+  --tex:none;
+  color-scheme:dark;
+}
+*{box-sizing:border-box;margin:0}
+[hidden]{display:none!important}
+html,body{height:100%;background:var(--ivory);color:var(--ink);font:14px/1.35 Archivo,system-ui,sans-serif;font-stretch:100%;overflow:hidden}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+button:disabled{cursor:not-allowed}
+button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
+.app{height:100vh;min-width:960px;min-height:620px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:58px minmax(0,1fr) 168px}
+
+/* engraved legends: dark fill with a light lower edge, as if cut into the panel */
+.engr{font-weight:600;font-stretch:120%;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
+
+/* mechanical push-buttons */
+.mech{height:34px;padding:0 14px;border-radius:5px;background:linear-gradient(var(--mech-a),var(--mech-b));border:1px solid var(--mech-edge);box-shadow:0 2px 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi);font-weight:600;font-stretch:115%;font-size:12px;letter-spacing:.08em;text-transform:uppercase;transition:transform .07s,box-shadow .07s}
+.mech:active:not(:disabled),.mech.down{transform:translateY(2px);box-shadow:0 0 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
+.mech:disabled{opacity:.45}
+.mech[aria-expanded=true]{background:linear-gradient(var(--mech-b),var(--ivory));transform:translateY(2px);box-shadow:inset 0 1px 3px #0003}
+
+/* ── title bar: a nameplate that is also the window's frame ─────────────────── */
+.top{display:flex;align-items:center;gap:22px;padding-left:26px;border-bottom:1px solid var(--rule);box-shadow:0 1px 0 var(--lip);app-region:drag;-webkit-app-region:drag;min-width:0}
+.top button{app-region:no-drag;-webkit-app-region:no-drag}
+.plate-name{display:flex;align-items:baseline;gap:12px;white-space:nowrap}
+.plate-name .model{font-weight:700;font-stretch:125%;font-size:20px;letter-spacing:-.01em}
+.plate-name{margin-right:auto}   /* the right-hand group stays put when the mini speaker appears */
+.instruments{display:flex;align-items:center;gap:18px}
+.meter{display:block}
+.meter .face{fill:var(--paper);stroke:var(--meter-edge)}
+.meter .scale-arc{fill:none;stroke:var(--engrave);stroke-width:1}
+.meter .low-arc{fill:none;stroke:var(--orange);stroke-width:2.5}
+.meter .needle{stroke:#c23b22;stroke-width:1.6;transition:transform .8s var(--ease);transform-origin:46px 36px}
+.meter text{font:600 7px Archivo;font-stretch:120%;letter-spacing:.12em;fill:var(--engrave)}
+.linkind{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;white-space:nowrap}
+.bulb{width:13px;height:13px;border-radius:50%;background:var(--led-off);box-shadow:inset 0 2px 3px #0005,0 1px 0 var(--lip);flex:none;transition:background .3s,box-shadow .3s}
+.bulb.on{background:radial-gradient(circle at 40% 35%,#cfe6ff,var(--blue-light) 65%);box-shadow:0 0 8px #3d8bffaa}
+.bulb.busy{background:var(--amber);animation:blink 1s steps(2) infinite}
+.bulb.err{background:var(--orange)}
+@keyframes blink{50%{opacity:.25}}
+.mini-speaker{width:96px;display:none;view-transition-name:speaker}
+.app.editing .mini-speaker{display:block}
+.winctl{display:flex;align-self:stretch}
+.winctl button{width:46px;display:grid;place-items:center;color:var(--ink-2)}
+.winctl button:hover{background:var(--hover);color:var(--ink)}.winctl .close:hover{background:#c42b1c;color:#fff}
+
+/* ── listening: three assignment modules wired to the speaker's EQ button ───── */
+.stage{position:relative;display:grid;place-items:center;overflow:hidden;background:var(--tex),var(--ivory);padding:14px 24px 34px}
+.app.editing .stage{display:none}
+.rig{position:relative;width:min(1000px,64vw,calc((100vh - 360px) * 2.3));min-width:620px}
+.spkwrap{position:relative}
+.spk .speaker{width:100%;display:block;view-transition-name:speaker;filter:drop-shadow(0 18px 22px #00000026)}
+:root[data-theme=dark] .spk .speaker{filter:drop-shadow(0 18px 26px #000b)}
+.spk-halo{transition:opacity .5s ease}.spk-ring{transition:stroke .5s ease}.spk-led{transition:fill .5s}
+.spk-led.connecting{animation:blink 1s steps(2) infinite}
+.units{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(10px,1.6vw,20px);margin-bottom:clamp(30px,6vh,58px)}
+.conduits{position:absolute;inset:0;pointer-events:none;overflow:visible}
+.conduits .cut{fill:none;stroke:var(--groove);stroke-width:1.3}
+.conduits .cut.live{stroke-width:3.2}
+.conduits .lip{fill:none;stroke:var(--lip);stroke-width:1.3;transform:translateY(1px)}
+.conduits .core{fill:none;stroke-width:1.6}
+.conduits .wire{opacity:0;transition:opacity .45s ease}.conduits .wire.on{opacity:1}
+.conduits .glow{fill:none;stroke-width:6;opacity:.2}
+.unit{position:relative;background:var(--well);border-radius:12px;padding:10px 12px 9px;min-width:0;
+  box-shadow:inset 0 2px 4px #00000024,inset 0 -1px 0 var(--lip),0 1px 0 var(--lip)}
+.unit .head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:8px}
+.unit .body{display:flex;gap:10px;align-items:stretch}
+/* the lamp key: a recessed bezel holding a lit face in the light's colour */
+.lampkey{flex:none;width:58px;height:58px;border-radius:9px;background:var(--bezel);padding:6px;box-shadow:inset 0 2px 4px #0005,0 1px 0 var(--lip);position:relative}
+.lampkey .face{display:block;width:100%;height:100%;border-radius:5px;border:1px solid #0004;box-shadow:0 3px 0 #0003,inset 0 -5px 10px #0002;transition:transform .07s,box-shadow .45s ease,filter .45s ease}
+.lampkey[data-light="0"] .face{background:linear-gradient(#5b5953,#3d3c38)}
+.lampkey[data-light="1"] .face{background:linear-gradient(#fffef8,#e2e0d7)}
+.lampkey[data-light="2"] .face{background:linear-gradient(#7fb2ff,#2f6fe4)}
+.lampkey:active .face{transform:translateY(2px);box-shadow:0 1px 0 #0003,inset 0 -5px 10px #0002}
+.unit.lit .lampkey[data-light="1"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px #ffffffcc;filter:brightness(1.05)}
+.unit.lit .lampkey[data-light="2"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px #3d8bffaa;filter:brightness(1.12)}
+.unit.lit .lampkey[data-light="0"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px #c4c7d070;filter:brightness(1.3)}
+.unit.armed .lampkey{animation:armed .9s steps(2) infinite}
+@keyframes armed{50%{box-shadow:inset 0 2px 4px #0005,0 0 0 3px var(--orange)}}
+.readout{flex:1;min-width:0;background:var(--lcd);border-radius:5px;padding:6px 9px 5px;box-shadow:inset 0 2px 5px #000a,0 1px 0 var(--lip);color:var(--lcd-ink);display:flex;flex-direction:column;justify-content:center;gap:5px;cursor:pointer;text-align:left}
+.readout .num{font:20px/1 Seg;position:relative;display:inline-block}
+.readout .num::before{content:"88";position:absolute;inset:0;color:var(--lcd-ghost)}
+.readout .num span{position:relative}
+.readout .nm{font:800 13px/1 Doto;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.unit .foot{display:flex;align-items:center;gap:7px;margin-top:8px;min-height:20px}
+.unit .foot .engr{letter-spacing:.1em;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.led{width:7px;height:7px;border-radius:50%;transition:background .35s,box-shadow .35s;background:var(--led-off);box-shadow:inset 0 1px 2px #0005;flex:none}
+.led.amber{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.led.orange{background:var(--orange);box-shadow:0 0 6px var(--orange)}
+.led.blink{animation:blink .8s steps(2) infinite}
+.led.ok{background:var(--led-ok);box-shadow:inset 0 1px 2px #0003}
+.foot .mech{height:22px;padding:0 8px;font-size:10px;margin-left:auto;flex:none}
+.unit.drop{box-shadow:inset 0 2px 4px #00000024,0 0 0 2px var(--orange)}
+
+/* ── the program bank: the one dark instrument panel ────────────────────────── */
+.bank{background:var(--panel);color:#d9d5cb;display:flex;align-items:center;gap:16px;padding:0 24px;box-shadow:inset 0 1px 0 #ffffff12;min-width:0}
+.bank .legend{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;font-weight:600;letter-spacing:.2em;color:#8f8a7f;font-stretch:120%;flex:none}
+.keys{display:flex;gap:10px;align-items:flex-end;min-width:0;flex:1}
+.group{display:flex;flex-direction:column;gap:7px;min-width:0}
+.group.factory{flex:none}.group.user{flex:1}
+.group-label{font-size:10.5px;letter-spacing:.14em;font-weight:600;color:#8f8a7f;font-stretch:120%;display:flex;align-items:center;gap:8px}
+.group-label::after{content:"";flex:1;height:1px;background:#4a4945}
+.row{display:flex;gap:clamp(6px,.7vw,9px);padding:12px 0 4px;margin-top:-4px}
+/* A full YOURS row shows whole keys only, between two page keys. A page key folds away at its end
+   of the row, so the keys start under the YOURS label, and slides back when there is more that way. */
+.userwrap{display:flex;align-items:flex-end;gap:clamp(6px,.7vw,9px);min-width:0}
+.userrow{overflow-x:auto;scrollbar-width:none;overscroll-behavior-x:contain;scroll-snap-type:x mandatory;flex:1 1 auto;min-width:0}
+.userrow .pkey{scroll-snap-align:start}
+.userrow.sorting{scroll-snap-type:none}   /* moving keys mid-drag must not make the row re-snap to them */
+.pager{display:none;flex:none;width:30px;padding:0;height:84px;margin-bottom:4px;border-radius:7px;background:#3c3c3f;color:#d9d5cb;place-items:center;
+  box-shadow:0 3px 0 #1c1c1d,0 6px 10px #0006;overflow:hidden;transition:width .3s var(--ease),margin .3s var(--ease),opacity .2s,transform .08s var(--ease),box-shadow .08s,background .15s}
+.userwrap.paged .pager{display:grid}
+/* the YOURS label starts over the first key, sliding with it as the left page key opens */
+.group.user .group-label{transition:padding-left .3s var(--ease)}.group.user.shifted .group-label{padding-left:calc(30px + clamp(6px,.7vw,9px))}.userwrap.paged .userrow{flex:none}
+.pager:hover{background:#48484b}.pager:active{transform:translateY(3px);box-shadow:0 0 0 #1c1c1d,0 2px 4px #0006}
+.pager.off{width:0;opacity:0;pointer-events:none}
+.pager.prev.off{margin-right:calc(-1 * clamp(6px,.7vw,9px))}.pager.next.off{margin-left:calc(-1 * clamp(6px,.7vw,9px))}
+.pkey{width:clamp(62px,5.6vw,80px);height:84px;border-radius:7px;background:var(--key);color:var(--key-ink);display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;padding:8px 8px 7px;position:relative;
+  box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0006;transition:transform .08s var(--ease),box-shadow .08s;flex:none}
+.pkey.user{background:var(--key-user)}
+.pkey.lifted{opacity:.35;outline:1.5px dashed var(--key-edge);outline-offset:-1.5px}   /* the gap a dragged key leaves */
+.pkey .n{font:700 24px/1 Archivo;font-stretch:112%;letter-spacing:-.02em}
+.pkey .t{font-size:11px;font-weight:500;font-stretch:82%;line-height:1.15;text-align:left;max-width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.pkey:active,.pkey.down{transform:translateY(3px);box-shadow:0 0 0 var(--key-edge),0 2px 4px #0006}
+.pkey .led{position:absolute;top:-11px;left:50%;width:14px;height:4px;margin-left:-7px;border-radius:2px;background:#4b4a46;box-shadow:none;transition:background .25s,box-shadow .25s}
+.pkey.playing .led{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.pkey.busy .led{background:var(--amber);animation:blink .5s steps(2) infinite}
+.pkey.editing{box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0006,inset 0 0 0 2px var(--orange)}
+.pkey.editing:active,.pkey.editing.down{box-shadow:0 0 0 var(--key-edge),inset 0 0 0 2px var(--orange)}
+/* an unsaved draft: a small amber lamp after the number */
+.pkey .dm{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px var(--amber);margin-left:5px;vertical-align:4px}
+.pkey .dot{position:absolute;right:7px;top:8px;display:flex;gap:3px}
+.pkey .dot i{width:7px;height:7px;border-radius:50%;border:1px solid #0004}
+.pkey .dot i.l0{background:#55565c}.pkey .dot i.l1{background:var(--white-light)}.pkey .dot i.l2{background:var(--blue-light)}
+.pkey.add{background:transparent;border:1.5px dashed #6d6a63;box-shadow:none;color:#bdb7aa;align-items:center;justify-content:center;gap:2px}
+.pkey.add .n{font-weight:400}
+.bank.choosing .pkey:not(.add){animation:offer 1.2s ease-in-out infinite}
+@keyframes offer{50%{box-shadow:0 3px 0 var(--key-edge),0 0 0 3px var(--orange)}}
+.lcdwrap{display:flex;align-items:center;gap:14px;flex:none}
+.lcd{width:210px;height:100px;background:var(--lcd);border-radius:6px;box-shadow:inset 0 2px 6px #000a,0 0 0 4px #1a1a1b;position:relative;overflow:hidden;view-transition-name:lcd;color:var(--lcd-ink)}
+.lcd .lstate{position:absolute;right:10px;top:8px;font:800 10px Doto;color:var(--lcd-dim)}
+.lcd svg{position:absolute;inset:0;width:100%;height:100%}
+.app.editing .lcd{display:none}   /* YOURS takes the room while the display is on the plate */
+@media (max-width:1180px){.lcd{display:none}}
+.bigkey{width:78px;height:84px;border-radius:7px;background:var(--orange);color:#fff;font-weight:700;font-stretch:120%;letter-spacing:.06em;font-size:13px;box-shadow:0 3px 0 var(--orange-edge),0 6px 10px #0006;transition:transform .08s;flex:none}
+.bigkey:active{transform:translateY(3px);box-shadow:0 0 0 var(--orange-edge)}
+.bigkey small{display:block;font-weight:500;letter-spacing:0;font-size:10.5px;opacity:.85;margin-top:3px}
+
+/* ── editing: one manufactured plate — display, gain scale, faders, transport ─ */
+.surface{display:none;grid-template-rows:auto minmax(0,1fr);grid-template-columns:minmax(0,1480px);justify-content:center;gap:12px;padding:14px 24px 16px;min-height:0;background:var(--tex),var(--ivory)}
+.app.editing .surface{display:grid}
+.namebar{display:flex;align-items:center;gap:18px;min-width:0}
+.namebar input{font:700 26px Archivo;font-stretch:118%;letter-spacing:-.01em;border:0;background:none;color:var(--ink);border-bottom:2px solid transparent;padding:0 2px;min-width:0;flex:1 1 auto;max-width:520px}
+.namebar input:hover:not([readonly]){border-bottom-color:var(--rule)}.namebar input[readonly]{pointer-events:none}.namebar input:focus{outline:0;border-bottom-color:var(--orange)}
+.annunciators{display:flex;align-items:center;gap:14px;margin-left:auto;flex:none}
+.ann{display:flex;align-items:center;gap:7px}
+.ann .win{width:16px;height:11px;border-radius:2px;background:var(--win-off);box-shadow:inset 0 1px 2px #0005;transition:background .2s,box-shadow .2s}
+.ann.on.amber .win{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.ann.on.orange .win{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+.ann.on.white .win{background:#fffef6;box-shadow:0 0 6px #fff,inset 0 0 0 1px #0002}
+.ann.on .engr{color:var(--ink)}
+
+.fplate{--chan:repeat(9,minmax(0,1fr));display:grid;grid-template-columns:40px var(--chan) 10px minmax(150px,176px);grid-template-rows:minmax(70px,1fr) auto auto;
+  min-height:0;align-self:center;height:100%;max-height:calc(34vh + var(--fh) + 150px);padding:14px 16px 12px;border-radius:14px;background:var(--tex),var(--alu);
+  box-shadow:inset 0 1px 0 var(--plate-hi),0 0 0 1px var(--plate-edge)}
+.lcdcell{grid-column:2/11;grid-row:1;min-height:0;padding:5px;border-radius:9px;background:#2d2c2a;box-shadow:inset 0 1px 0 #ffffff1a,0 1px 0 var(--lip)}
+.display{position:relative;height:100%;background:var(--lcd);border-radius:5px;box-shadow:inset 0 2px 8px #000c;view-transition-name:lcd;color:var(--lcd-ink);touch-action:none;overflow:hidden}
+.display svg{position:absolute;inset:0;width:100%;height:100%}
+.display.editable{cursor:ns-resize}
+.grid line{stroke:#d5ecab;stroke-opacity:.07;stroke-width:1}.grid line.zero{stroke-opacity:.22}.grid text{fill:var(--lcd-dim);font:800 9px Doto}
+.col-hot{fill:#d5ecab10;transition:x .15s var(--ease)}
+.curve{fill:none;stroke:#e6f6c6;stroke-width:2.4;stroke-linejoin:round}
+.curve-fill{fill:#d5ecab0a;transition:opacity .3s}
+.bars rect{fill:var(--lcd-ink);opacity:.12}
+.ghost{fill:none;stroke:var(--amber);stroke-width:1.3;stroke-dasharray:3 4;opacity:.85}
+.mark{fill:var(--lcd);stroke:var(--lcd-ink);stroke-width:1.5}
+.nib{fill:var(--lcd-ink);opacity:0}
+/* gain scale and channels share one geometry: value window, then the fader travel */
+.scale,.channels{grid-row:2;position:relative;padding-top:12px}
+.scale.left{grid-column:1}.scale.right{display:none}
+.channels{grid-column:2/11;display:grid;grid-template-columns:var(--chan)}
+.scale .travel,.rules{position:absolute;left:0;right:0;top:calc(12px + 34px + 13px);height:var(--fh)}
+.scale span{position:absolute;transform:translateY(-50%);font:600 10px Archivo;font-stretch:110%;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
+.scale.left span{right:6px}.scale.right span{left:6px}
+.scale span.minor{color:var(--ink-3);font-weight:500;font-size:9px}
+.rules i{position:absolute;left:0;right:0;height:1px;background:var(--rule-line);box-shadow:0 1px 0 var(--lip)}
+.rules i.major{background:var(--rule-major)}.rules i.zero{background:var(--engrave);height:1.5px}
+/* the whole channel takes the pointer, not just the 46px fader: a press anywhere in the column sets that band */
+.chan{position:relative;display:flex;flex-direction:column;align-items:center;min-width:0}
+.channels:not(.locked) .chan{cursor:ns-resize}
+.fplate{-webkit-user-select:none;user-select:none}
+.chan::before{content:"";position:absolute;inset:-7px 3px 0;border-radius:6px;background:#ffffff00;transition:background .15s}
+.chan.hot::before{background:var(--hot)}
+.chan .val{position:relative;height:24px;min-width:42px;padding:0 6px;display:flex;align-items:center;justify-content:flex-end;line-height:1;margin-bottom:10px;border-radius:3px;background:var(--lcd);box-shadow:inset 0 1px 3px #000a,0 1px 0 var(--lip);color:var(--lcd-ink);font:13px Seg;text-align:right}
+.chan .val i{font:700 12px/1 Archivo;font-style:normal;margin-right:3px}
+.slot{position:relative;width:46px;height:calc(var(--fh) + 26px);cursor:ns-resize;touch-action:none}
+.slot::before{content:"";position:absolute;left:50%;top:13px;bottom:13px;width:6px;margin-left:-3px;background:#2c2b29;border-radius:3px;box-shadow:inset 0 1px 2px #000,0 1px 0 var(--lip)}
+.cap{position:absolute;left:3px;width:40px;height:26px;border-radius:5px;background:var(--c);box-shadow:0 3px 0 #0003,0 4px 8px #0004,inset 0 1px 0 #ffffff55;transition:top .45s var(--ease)}
+.cap::after{content:"";position:absolute;left:6px;right:6px;top:50%;height:2px;margin-top:-1px;background:#ffffffd0;border-radius:1px}
+.slot.drag .cap{transition:none}
+.slot.locked{cursor:default}.slot.locked .cap{background:color-mix(in srgb,var(--c) 35%,#bdb7aa)}
+.chan .hz{position:relative;margin-top:7px;font:700 12px Archivo;font-stretch:110%;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
+.groups{grid-column:2/11;grid-row:3;display:grid;grid-template-columns:repeat(3,1fr);gap:0 10px;padding:6px 6px 0}
+.groups span{border-top:2px solid var(--c);padding-top:4px;text-align:center;font-weight:600;font-stretch:120%;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
+.transport{grid-column:12;grid-row:1/4;display:flex;flex-direction:column;gap:8px;margin-left:16px;padding-left:16px;border-left:1px solid var(--divider);box-shadow:-1px 0 0 var(--lip);min-height:0}
+.transport .mech{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.04em;width:100%;height:clamp(30px,calc((100vh - 360px) / 10),40px);display:flex;align-items:center;justify-content:space-between;text-align:left;flex:none}
+.transport .mech.go{background:linear-gradient(#ff7a3a,var(--orange));color:#fff;border-color:var(--orange-edge);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
+.transport .mech.state{background:linear-gradient(var(--ivory),var(--well));color:var(--ink);opacity:1;cursor:default;box-shadow:inset 0 1px 3px #0002;transform:translateY(2px)}
+.transport .mech.state .lamp{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.transport .mech .lamp{width:12px;height:8px;border-radius:2px;background:var(--win-off);box-shadow:inset 0 1px 2px #0005}
+.transport .mech[aria-pressed=true] .lamp{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+.transport .sep{flex:1;min-height:4px}
+.transport .note{font-size:11.5px;color:var(--ink-2);line-height:1.35}
+
+/* ── device sheet ───────────────────────────────────────────────────────────── */
+.sheet{position:fixed;right:24px;top:66px;width:368px;max-height:calc(100vh - 90px);overflow:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;background:var(--paper);border:1px solid var(--sheet-edge);border-radius:10px;padding:16px 18px 14px;z-index:9;box-shadow:0 20px 50px #0003;animation:drop .3s var(--ease)}
+@keyframes drop{from{opacity:0;transform:translateY(-8px)}}
+.sheet section{padding:14px 0 12px;border-top:1px solid var(--rule)}.sheet section:first-child{border-top:0;padding-top:2px}
+.sheet h4{margin:0 0 10px}
+.dv-label{font-size:12.5px;font-weight:600;color:var(--ink);margin:2px 0 8px;display:flex;align-items:baseline;gap:8px}.dv-label small{font-weight:400;color:var(--ink-3);font-size:11.5px}
+/* every control in the sheet is the same key as the rest of the app: 1px edge, 2px drop, 5px corners */
+.chip,.wtile,.pk,.dv-seg{border:1px solid var(--mech-edge);border-radius:5px;background:linear-gradient(var(--mech-a),var(--mech-b));box-shadow:0 2px 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
+.chip,.pk{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 11px;font-size:12px;font-weight:500;transition:transform .07s,box-shadow .07s}
+.chip::before,.pk::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--win-off);box-shadow:inset 0 1px 1px #0004;transition:background .25s,box-shadow .25s}
+.chip[aria-pressed=true]::before,.pk[aria-pressed=true]::before{background:var(--orange);box-shadow:0 0 6px var(--orange)}
+.chip:active:not(:disabled),.pk:active,.wtile:active{transform:translateY(2px);box-shadow:0 0 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
+.chip:disabled{opacity:.45}
+.dv-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
+.dv-sw{width:100%;display:flex;justify-content:space-between;align-items:center;padding:10px 0 2px;text-align:left;gap:14px}
+.dv-sw b{display:block;font-weight:600;font-size:13px}.dv-sw small{display:block;font-size:11.5px;color:var(--ink-2);margin-top:1px}
+.dv-sw:disabled{opacity:.45}
+.dv-sw i{width:36px;height:20px;border-radius:5px;background:var(--sw-off);position:relative;flex:none;border:1px solid var(--mech-edge);box-shadow:inset 0 1px 2px #0004;transition:background .25s ease}
+.dv-sw i::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:3px;background:var(--key);box-shadow:0 1px 2px #0005;transition:transform .25s var(--ease)}
+.dv-sw[aria-checked=true] i{background:var(--orange)}.dv-sw[aria-checked=true] i::after{transform:translateX(16px)}
+.dv-wgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 6px;padding-bottom:2px}
+.wtile{position:relative;height:46px;padding:16px 9px 0;font-size:12px;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:transform .07s,box-shadow .2s,border-color .2s}
+.wtile small{position:absolute;left:9px;top:5px;font-size:9.5px;font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
+.wtile[aria-expanded=true]{border-color:var(--orange);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 var(--mech-hi)}
+/* the picker slides open under the layout; the panel grows with it instead of jumping */
+.dv-pick{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .3s var(--ease),opacity .25s ease}
+.dv-pick.open{grid-template-rows:1fr;opacity:1}.dv-pick>div{min-height:0;overflow:hidden}
+.dv-list{max-height:190px;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:10px 2px 8px}
+.dv-list h5{grid-column:1/-1;margin:2px 0 -1px;font-size:10px;font-weight:600;font-stretch:120%;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.pk{min-width:0;justify-content:flex-start;text-align:left}.pk span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.dv-seg{display:grid;grid-template-columns:repeat(3,1fr);overflow:hidden}
+.dv-seg button{height:30px;font-size:11.5px;font-weight:600;font-stretch:115%;letter-spacing:.08em;text-transform:uppercase;border-left:1px solid var(--mech-edge);transition:background .2s,color .2s}
+.dv-seg button:first-child{border-left:0}
+.dv-seg button[aria-pressed=true]{background:var(--well);box-shadow:inset 0 1px 3px #0004;color:var(--orange)}
+.dv-row{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--rule)}.dv-row .mech{flex:1;height:30px;font-size:11px}
+.dv-note{font-size:11.5px;color:var(--ink-3);margin-top:10px;line-height:1.45}
+.dv-err{font-size:12.5px;color:var(--orange);margin:0 0 10px}
+
+/* ── offline: everything that needs the speaker says so, and how to get it back ─ */
+.offline-card{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 22px;border-radius:10px;
+  background:var(--tex),var(--paper);box-shadow:0 0 0 1px var(--rule),0 12px 30px #0003;text-align:center;width:min(430px,86%);z-index:2}
+.offline-card .engr{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink)}
+.offline-card p{font-size:12.5px;color:var(--ink-2);line-height:1.4}
+.offline-card .acts{display:flex;gap:8px;margin-top:2px}.offline-card .mech{white-space:nowrap}
+.app.offline .spk .speaker,.app.offline .mini-speaker svg{filter:grayscale(1) brightness(.85);opacity:.5}
+.app.offline .lampkey .face{filter:grayscale(.9) brightness(.7);box-shadow:0 1px 0 #0003}
+.app.offline .lampkey,.app.offline .readout{cursor:not-allowed}
+.app.offline .readout{color:var(--lcd-dim)}
+.app.offline .conduits{opacity:.45}
+.app.offline .meter{opacity:.5}
+.app.offline:not(.editing) .pkey:not(.add){filter:saturate(.25) brightness(.6);box-shadow:0 1px 0 var(--key-edge)}
+.app.offline .lcd .curve{stroke:var(--lcd-dim)}.app.offline .lcd .curve-fill{opacity:0}
+.lcd .lstate.off{color:var(--orange)}
+
+.toast{position:fixed;left:50%;bottom:184px;transform:translateX(-50%);background:var(--ink);color:var(--ivory);padding:9px 16px;border-radius:99px;font-size:13px;z-index:10;animation:drop .25s var(--ease);white-space:nowrap}
+.toast button{color:var(--amber);font-weight:600;margin-left:12px}
+.mock-strip{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;gap:10px;align-items:center;padding:8px 12px;background:#000e;color:#aaa;font:11px Archivo}
+.mock-strip button{border:1px solid #555;padding:3px 8px;border-radius:4px}.mock-strip button.on{background:var(--orange);color:#000}
+.mock-strip input{vertical-align:middle;width:90px}
+
+/* ── smaller windows: keep the composition, tighten the details ─────────────── */
+@media (max-width:1180px){
+  .meter{display:none}
+  .fplate{grid-template-columns:30px var(--chan) 8px 150px}
+  .transport{margin-left:10px;padding-left:10px}
+  .chan .val{min-width:36px;padding:0 4px}
+  .slot{width:40px}.cap{left:3px;width:34px}
+  .pkey .t{font-size:10px;font-stretch:75%}
+}
+@media (max-height:760px){.scale span.minor{display:none}}
+@media (max-height:700px){
+  .app{grid-template-rows:52px minmax(0,1fr) 150px}
+  .pkey,.bigkey,.pager{height:72px}.pkey .n{font-size:21px}
+  .unit .foot{margin-top:6px}.lampkey{width:52px;height:52px}
+}
+
+/* ── motion: mode changes step back, then the new parts rise in, in reading order ─ */
+@keyframes rise{from{opacity:0;transform:translateY(12px)}}
+@keyframes fall{from{opacity:0;transform:translateY(-10px)}}
+@keyframes fadein{from{opacity:0}}
+.stage>*,.surface>*,.lcdwrap{transition:opacity .15s ease,transform .15s ease}
+.app.leaving .stage>*,.app.leaving .surface>*{opacity:0;transform:translateY(6px) scale(.995)}
+.app.leaving .lcd{opacity:0;transition:opacity .15s}
+.app.arriving .rig .spkwrap{animation:rise .55s var(--ease) both}
+.app.arriving .unit{animation:fall .45s var(--ease) both}
+.app.arriving .unit:nth-child(2){animation-delay:.05s}.app.arriving .unit:nth-child(3){animation-delay:.1s}
+.app.arriving .conduits{animation:fadein .5s .25s both}
+.app.arriving .namebar{animation:rise .4s var(--ease) both}
+.app.arriving .lcdcell{animation:rise .5s .03s var(--ease) both}
+.app.arriving .chan{animation:rise .5s calc(var(--i,0) * 22ms + 60ms) var(--ease) both}
+.app.arriving .scale,.app.arriving .groups{animation:fadein .5s .15s both}
+.app.arriving .transport{animation:rise .5s .12s var(--ease) both}
+.app.arriving .lcd,.app.arriving .mini-speaker{animation:fadein .45s both}
+.offline-card:not([hidden]){animation:rise .35s var(--ease) both}
+.sheet.closing{animation:none;opacity:0;transform:translateY(-6px);transition:opacity .16s,transform .16s}
+.toast.out{opacity:0;transform:translate(-50%,6px);transition:opacity .2s,transform .2s}
+:root.theming *,:root.theming *::before,:root.theming *::after{transition:background-color .4s,color .4s,border-color .4s,box-shadow .4s,fill .4s,stroke .4s!important}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@media (forced-colors:active){
+  .pkey,.mech,.unit,.readout,.lcd,.display,.bigkey,.chan .val{border:1px solid CanvasText;forced-color-adjust:none;background:Canvas;color:CanvasText}
+  .pkey.playing,.pkey.editing,.unit.lit{outline:3px solid Highlight;outline-offset:-3px}
+  .curve{stroke:Highlight}.cap{background:ButtonText}
+}

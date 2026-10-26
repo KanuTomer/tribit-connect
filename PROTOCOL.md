@@ -20,14 +20,16 @@ Frame: `HDR 01 CMD LEN_LO LEN_HI DATA... SUM`
 | 0x8C | set | `00` off / `01` on | auto shutdown |
 | 0x90 | set | 5 bytes: power, BT pairing, low battery, max volume, TWS beeps (1 = on) | voice prompts |
 | 0x91 | get | same 5 bytes | voice prompts |
-| 0x18 | set | per light: `03 <light 0-2> <preset id>` + 9 zero bytes | EQ button mapping (lights: off, white, blue) |
+| 0x18 | set | per light: `03 <light 0-2> <preset id>` + 9 zero bytes, or `FE` + 9 bands | EQ button mapping (lights: off, white, blue) |
 | 0x19 | get | same layout, one reply per light | EQ button mapping |
 
 Preset ids: 0 XBass Off, 1 XBass, 3 MaxSound traditional, 5 Jazz.
 Audiobook = 2 and Rock = 4 (confirmed below; the phone capture's button read had suggested the reverse).
 
-Not captured: countdown to shutdown set command, custom EQ band frequencies
-(9 bands, 80 Hz .. 13 kHz per reviews), band range limits.
+Custom EQ bands (labels in the Tribit app): 80, 150, 300, 600, 1.2k, 2.5k, 5k, 9k, 13k Hz,
+each -8..+8 dB in 1 dB steps (bytes 0x00..0x10).
+
+Not captured: countdown to shutdown set command.
 
 ## Confirmed from Windows (tribit-probe, 2026-10-25)
 
@@ -46,5 +48,16 @@ Not captured: countdown to shutdown set command, custom EQ band frequencies
 - Preset ids confirmed by applying them from Windows and checking the app:
   2 = Audiobook, 4 = Rock. The full list is 0 XBass Off, 1 XBass, 2 Audiobook,
   3 MaxSound traditional, 4 Rock, 5 Jazz.
+## Custom EQ and the EQ button (tribit-probe, 2026-10-26)
+
+- 0x82 `FE` + bands is stored and read back byte for byte, including values outside the app's
+  range (+9 and +12 dB read back as 0x11 and 0x14). The speaker does not clamp, so hosts must
+  enforce -8..+8 dB themselves.
+- The speaker holds one custom curve. The Tribit app's named custom profiles live on the phone.
+- An EQ button slot accepts a custom curve: 0x18 `03 <light> FE <9 band bytes>`. 0x19 reads it
+  back the same way, and pressing the button to that light makes 0x05 report `FE` + those bands,
+  audibly. So each light can hold its own custom curve, independent of the 0x82 custom slot.
+- Both the active custom EQ and custom button slots survive a power cycle.
+
 - 0x08 read `01` on a later run (it had been `00`), so it is not simply "countdown off";
   its meaning is still unknown.

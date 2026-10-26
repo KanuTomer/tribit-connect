@@ -1,4 +1,5 @@
 #include "widget_card.hpp"
+#include "widget_artwork.hpp"
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Data.Json.h>
 #include <iostream>
@@ -47,7 +48,7 @@ int main(){try{
 
     expect(data(offline).GetNamedBoolean(L"showRetry")&&!data(connected()).GetNamedBoolean(L"showRetry"),"Retry only after reconnecting gives up");
     auto large_home=make_card(connected(),WidgetSize::Large).tmpl;
-    expect(has(large_home,"eq.preset.4")&&!has(large_home,"media.")&&!has(large_home,"volume."),"Large Home lists presets and has no playback buttons");
+    expect(has(large_home,"eq.slot.5")&&!has(large_home,"media.")&&!has(large_home,"volume."),"Large Home lists presets and has no playback buttons");
 
     // Speaker switched off: one calm state, no Retry, and the same wording on every page.
     expect(status_label(off)=="Disconnected"&&status_label(offline)=="Controls unavailable"&&status_label(connected())=="Connected","Status wording");
@@ -55,12 +56,12 @@ int main(){try{
     expect(str(d,L"status")=="Disconnected"&&str(data(off,WidgetPage::Diagnostics),L"connection")=="Disconnected"&&!d.GetNamedBoolean(L"showRetry"),"Disconnected without Retry");
     expect(str(data(connected()),L"status").empty()&&str(data(connected(),WidgetPage::Diagnostics),L"connection")=="Connected","Healthy Home shows no status");
     // Last-known values are labelled, and speaker settings are not shown as current.
-    expect(str(d,L"eqNote")=="Last: XBass"&&str(d.GetNamedObject(L"p1"),L"title")=="XBass, last used"&&data(off,WidgetPage::Home,nullptr,art).GetNamedBoolean(L"hasCurve"),"Last-known preset is labelled");
+    expect(str(d,L"eqNote")=="Last: XBass"&&str(d.GetNamedObject(L"s1"),L"title")=="XBass, last used"&&data(off,WidgetPage::Home,nullptr,art).GetNamedBoolean(L"hasCurve"),"Last-known preset is labelled");
     expect(str(data(off,WidgetPage::Home,nullptr,art).GetNamedObject(L"curve"),L"dark")=="dark-1-80","Disconnected keeps the last curve");
     auto settings=data(off,WidgetPage::More);
     expect(str(data(off,WidgetPage::Prompts).GetNamedObject(L"q0"),L"value")=="--"&&str(settings.GetNamedObject(L"m1"),L"value")=="--"&&str(settings,L"note")=="Not connected","Speaker settings show -- while disconnected");
     expect(str(settings.GetNamedObject(L"m2"),L"value")=="Off","App preferences keep their values while disconnected");
-    expect(!data(custom,WidgetPage::Home,nullptr,art).GetNamedBoolean(L"hasCurve")&&str(data(custom),L"eqNote")=="Custom EQ active","Custom EQ hides the curve");
+    expect(!data(custom,WidgetPage::Home,nullptr,art).GetNamedBoolean(L"hasCurve")&&str(data(custom),L"eqNote")=="Custom curve","A custom curve without artwork shows no image");
     expect(str(parse(make_card(connected(),WidgetSize::Large,{},art).data).GetNamedObject(L"curve"),L"dark")=="dark-1-96","Each size gets its own curve height");
     expect(str(data(low),L"batteryColor")=="Attention"&&str(data(low),L"batteryText")=="12%","Low battery is marked");
     // Medium settings and prompts fit on one page; the Bluetooth link moved to Device.
@@ -81,20 +82,35 @@ int main(){try{
     s.pending=true;
     expect(!setting_command(s,L"eq.preset.4"),"No command while another is pending");
     expect(!setting_command(offline,L"eq.preset.4"),"No command while disconnected");
+    {   // Sound Lab can put a saved curve on a widget button.
+        auto slots=default_slots();slots[2]={tribit::Custom,{3,2,1,0,0,0,1,2,3},"Night Desk"};
+        auto live=connected();
+        expect(!setting_command(live,L"eq.slot.1",slots)&&!setting_command(live,L"eq.slot.6",slots),"The active button and unknown buttons do nothing");
+        auto saved=setting_command(live,L"eq.slot.2",slots);
+        expect(saved&&saved->operation==Operation::CustomEq&&saved->bands==slots[2].bands,"A saved-curve button writes its curve");
+        live.preset=tribit::Custom;live.bands=slots[2].bands;
+        expect(!setting_command(live,L"eq.slot.2",slots),"The playing saved curve does nothing");
+        auto d=parse(make_card(live,WidgetSize::Medium,{},art,false,slots).data);
+        expect(str(d.GetNamedObject(L"s2"),L"label")=="Night Desk"&&str(d.GetNamedObject(L"s2"),L"color")=="Accent"&&str(d,L"eqNote")=="Night Desk","The playing saved curve is named and highlighted");
+        WidgetIcons drawn=art;custom_artwork(drawn,slots[2].bands,false);
+        expect(parse(make_card(live,WidgetSize::Medium,{},drawn,false,slots).data).GetNamedBoolean(L"hasCurve"),"Saved curves are drawn");
+        live.bands[0]=-8;
+        expect(str(parse(make_card(live,WidgetSize::Medium,{},art,false,slots).data).GetNamedObject(L"s2"),L"color")=="Default","Another custom curve highlights nothing");
+    }
 
     WidgetView view;
     expect(navigate_widget(view,L"view.prompts")&&view.page==WidgetPage::Prompts,"Navigate to prompts");
     expect(navigate_widget(view,L"view.details.next")&&view.details_page==1,"Page forward");
     // Medium is an EQ switcher first: all six presets on Home, settings behind one button.
     auto medium=make_card(connected(),WidgetSize::Medium).tmpl;
-    expect(has(medium,"eq.preset.0")&&has(medium,"eq.preset.5")&&has(medium,"view.more")&&!has(medium,"view.eq"),"Medium Home lists every preset");
+    expect(has(medium,"eq.slot.0")&&has(medium,"eq.slot.5")&&has(medium,"view.more")&&!has(medium,"view.eq"),"Medium Home lists every preset");
     // Only the selected preset's text takes the accent colour; no images are involved.
     { auto t=data(connected());
-      expect(str(t.GetNamedObject(L"p1"),L"color")=="Accent"&&str(t.GetNamedObject(L"p0"),L"color")=="Default","Only the selected preset is highlighted");
+      expect(str(t.GetNamedObject(L"s1"),L"color")=="Accent"&&str(t.GetNamedObject(L"s0"),L"color")=="Default","Only the selected preset is highlighted");
       expect(!has(make_card(connected(),WidgetSize::Medium,{},art).tmpl,"backgroundImage"),"Buttons carry no background images"); }
     // A click shows its result before the speaker confirms it.
     { auto t=data(busy,WidgetPage::Home,&chosen);
-      expect(str(t.GetNamedObject(L"p4"),L"title")=="Rock, selected"&&str(data(busy,WidgetPage::Home,&chosen,art).GetNamedObject(L"curve"),L"dark")=="dark-4-80","Chosen preset and its curve show at once");
+      expect(str(t.GetNamedObject(L"s3"),L"title")=="Rock, selected"&&str(data(busy,WidgetPage::Home,&chosen,art).GetNamedObject(L"curve"),L"dark")=="dark-4-80","Chosen preset and its curve show at once");
       // The confirmation must not differ, or it becomes a second update (each one rebuilds the card).
       auto confirmed=connected();confirmed.preset=tribit::Rock;
       for(auto page:pages){auto pending_view=view_of(page);pending_view.proposed=chosen.proposed;

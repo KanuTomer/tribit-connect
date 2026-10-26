@@ -15,7 +15,8 @@ struct Snapshot {
     std::array<int,tribit::kEqBands> bands{}; // dB, only meaningful while preset is Custom
     std::array<int,5> prompts{-1,-1,-1,-1,-1};
     int auto_shutdown=-1;
-    std::array<int,3> buttons{-1,-1,-1};   // preset id per EQ button light
+    std::array<int,3> buttons{-1,-1,-1};   // preset id per EQ button light (Custom: see button_bands)
+    std::array<std::array<int,tribit::kEqBands>,3> button_bands{}; // dB, for lights holding a custom curve
     int64_t checked{};
     bool release_when_hidden{};
 };
@@ -27,8 +28,10 @@ inline constexpr std::array<const char*,3> kLightLabels{"Light off","White light
 inline std::string preset_label(int preset){return preset<0?"Not checked":tribit::preset_name(static_cast<uint8_t>(preset));}
 inline bool valid_preset(int preset){return std::find(kPresetOrder.begin(),kPresetOrder.end(),preset)!=kPresetOrder.end();}
 
-enum class Operation { Activate, Deactivate, Retry, Preset, Prompt, AutoShutdown, Buttons, Policy, Suspend, Reconnect, Disconnect };
-struct Command { Operation operation; int value{}; int index{}; std::array<int,3> buttons{}; };
+enum class Operation { Activate, Deactivate, Retry, Preset, CustomEq, Prompt, AutoShutdown, Buttons, Policy, Suspend, Reconnect, Disconnect };
+using Bands=std::array<int,tribit::kEqBands>;
+// `id` (non-zero) asks for a result callback once the speaker confirms or the command fails.
+struct Command { Operation operation; int value{}; int index{}; std::array<int,3> buttons{}; int id{}; Bands bands{}; std::array<Bands,3> button_bands{}; };
 
 class Controller {
 public:
@@ -47,6 +50,8 @@ public:
         {std::lock_guard lock(mutex_);state_.release_when_hidden=release;commands_.push_back({Operation::Policy});SetEvent(wake_);}
         notify_();
     }
+    // Called on the worker thread with a command's id once it is confirmed or has failed.
+    std::function<void(int,bool,const std::string&)> on_result;
     bool send(Command command) {
         {
             std::lock_guard lock(mutex_);
@@ -69,6 +74,13 @@ private:
     bool requested_active_{}, stopping_{};
     std::thread worker_;
 
+    void report(int id,bool ok,const std::string& error={}){if(id&&on_result)on_result(id,ok,error);}
+    // Drops queued setting commands (the link is gone) and fails the ones that asked for a result.
+    void drop_settings(const std::string& why){
+        std::vector<int> failed;
+        {std::lock_guard lock(mutex_);std::erase_if(commands_,[&](const auto& c){bool drop=c.operation!=Operation::Activate&&c.operation!=Operation::Deactivate;if(drop&&c.id)failed.push_back(c.id);return drop;});}
+        for(int id:failed)report(id,false,why);
+    }
     void publish(const std::function<void(Snapshot&)>& change) {
         {std::lock_guard lock(mutex_); change(state_);}
         notify_();
@@ -98,7 +110,16 @@ private:
     static void read_buttons(tribit::Speaker& speaker,Snapshot& next){
         next.buttons.fill(-1);
         for(auto& frame:speaker.request(tribit::GetEqButtons,{},3))
-            if(auto slot=tribit::parse_button_slot(frame.data))next.buttons[slot->light]=slot->preset;
+            if(auto slot=tribit::parse_button_slot(frame.data)){
+                next.buttons[slot->light]=slot->preset;
+                for(size_t i=0;i<tribit::kEqBands;++i)next.button_bands[slot->light][i]=slot->preset==tribit::Custom?tribit::band_db(frame.data[3+i]):0;
+            }
+    }
+    // Custom curves: -8..+8 dB per band. The speaker stores anything, so the limit is ours.
+    static tribit::Eq custom_eq(const Bands& bands){
+        tribit::Eq eq{tribit::Custom};
+        for(size_t i=0;i<bands.size();++i){if(bands[i]<-8||bands[i]>8)throw std::runtime_error("Band gains must be between -8 and +8 dB.");eq.bands[i]=static_cast<uint8_t>(bands[i]+tribit::kBandZero);}
+        return eq;
     }
     // Publishes a confirmed snapshot together with the queue state, so the widget gets one update, not three.
     void commit(Snapshot next){
@@ -130,6 +151,9 @@ private:
             if(!valid_preset(command.value))throw std::runtime_error("Unknown EQ preset.");
             acknowledged(speaker.request(SetEq,eq_payload({static_cast<uint8_t>(command.value)})),"The preset change");
             read_eq(speaker,next);confirmed=next.preset==command.value;
+        }else if(command.operation==Operation::CustomEq){
+            acknowledged(speaker.request(SetEq,eq_payload(custom_eq(command.bands))),"The custom EQ");
+            read_eq(speaker,next);confirmed=next.preset==Custom&&next.bands==command.bands;
         }else if(command.operation==Operation::Prompt){
             if(command.index<0||command.index>4||std::any_of(next.prompts.begin(),next.prompts.end(),[](int v){return v<0;}))throw std::runtime_error("Voice prompts have not been read.");
             VoicePrompts prompts{};for(size_t i=0;i<prompts.size();++i)prompts[i]=next.prompts[i]==1;
@@ -140,11 +164,17 @@ private:
             acknowledged(speaker.request(SetAutoShutdown,Bytes{static_cast<uint8_t>(command.value?1:0)}),"The auto shutdown change");
             read_shutdown(speaker,next);confirmed=next.auto_shutdown==(command.value?1:0);
         }else if(command.operation==Operation::Buttons){
-            std::array<uint8_t,3> presets{};
-            for(size_t i=0;i<presets.size();++i){if(!valid_preset(command.buttons[i]))throw std::runtime_error("Unknown EQ preset.");presets[i]=static_cast<uint8_t>(command.buttons[i]);}
-            speaker.send(eq_buttons_write(presets));
+            // Each light holds a factory preset or its own custom curve.
+            std::array<Eq,3> slots{};
+            for(size_t i=0;i<slots.size();++i){
+                if(command.buttons[i]==Custom)slots[i]=custom_eq(command.button_bands[i]);
+                else if(valid_preset(command.buttons[i]))slots[i]=Eq{static_cast<uint8_t>(command.buttons[i])};
+                else throw std::runtime_error("Unknown EQ preset.");
+            }
+            speaker.send(eq_slots_write(slots));
             acknowledged(speaker.collect(SetEqButtons,3,1500ms),"The EQ button change");
             read_buttons(speaker,next);confirmed=next.buttons==command.buttons;
+            for(size_t i=0;i<slots.size();++i)if(command.buttons[i]==Custom&&next.button_bands[i]!=command.button_bands[i])confirmed=false;
         }else throw std::runtime_error("Unsupported setting command.");
         // A change only counts once the speaker reports it back.
         if(!confirmed)throw std::runtime_error("The speaker did not confirm the change.");
@@ -201,6 +231,7 @@ private:
                 } else if(command) {
                     if(!speaker || !active) throw std::runtime_error("Controls are inactive. Open the widget and retry.");
                     execute(*speaker,*command);
+                    report(command->id,true);
                 }
                 if(speaker && !active && Clock::now()>=release_at) {
                     speaker.reset();
@@ -223,17 +254,21 @@ private:
                 // A dropped control channel gets one recheck, in case the speaker is still on.
                 if(speaker&&link_grace==0)link_grace=1;
                 speaker.reset();refresh_at=Clock::time_point::max();
-                {std::lock_guard lock(mutex_);std::erase_if(commands_,[](const auto& c){return c.operation!=Operation::Activate && c.operation!=Operation::Deactivate;});}
+                if(command)report(command->id,false,"The speaker is not connected.");
+                drop_settings("The speaker is not connected.");
                 if(link_grace>0&&retries<std::size(retry_delays)){--link_grace;retry_at=Clock::now()+retry_delays[retries++];}
                 else{retry_at=Clock::time_point::max();retries=0;link_grace=0;}
                 publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";s.error.clear();});
             } catch(const std::exception& error) {
                 speaker.reset();refresh_at=Clock::time_point::max();
-                {std::lock_guard lock(mutex_);std::erase_if(commands_,[](const auto& c){return c.operation!=Operation::Activate && c.operation!=Operation::Deactivate;});}
+                if(command)report(command->id,false,error.what());
+                drop_settings("The speaker connection was reset.");
                 publish([&](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Controls unavailable";s.error=error.what();});
                 if(connecting&&!suspended&&retries<std::size(retry_delays))retry_at=Clock::now()+retry_delays[retries++];
             } catch(const winrt::hresult_error& error) {
                 speaker.reset();refresh_at=Clock::time_point::max();
+                if(command)report(command->id,false,winrt::to_string(error.message()));
+                drop_settings("Bluetooth is unavailable.");
                 if(connecting&&!suspended&&retries<std::size(retry_delays))retry_at=Clock::now()+retry_delays[retries++];
                 publish([&](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Bluetooth unavailable";s.error=winrt::to_string(error.message());});
             }
