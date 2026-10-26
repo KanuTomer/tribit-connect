@@ -34,6 +34,16 @@ if(TRIBIT_BUILD_APP)
   target_compile_options(TribitConnect PRIVATE /W4 /utf-8 /permissive- /bigobj)
   target_link_libraries(TribitConnect PRIVATE Ws2_32 Bthprops windowsapp comctl32 dwmapi shell32 advapi32 ole32 uxtheme windowscodecs uuid "${TRIBIT_WEBVIEW2}/x64/WebView2LoaderStatic.lib")
   set_target_properties(TribitConnect PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+  # The one-file installer embeds the signed MSIX, so scripts/package.ps1 builds it after packaging.
+  set(TRIBIT_ICON "${CMAKE_SOURCE_DIR}/packaging/app.ico")
+  set(TRIBIT_SETUP "${CMAKE_BINARY_DIR}/setup")
+  configure_file(packaging/setup.rc.in "${TRIBIT_SETUP}/setup.rc" @ONLY)
+  add_executable(TribitConnectSetup EXCLUDE_FROM_ALL WIN32 src/setup.cpp packaging/setup.manifest "${TRIBIT_SETUP}/setup.rc")
+  target_include_directories(TribitConnectSetup BEFORE PRIVATE "${CMAKE_BINARY_DIR}/generated")
+  target_compile_definitions(TribitConnectSetup PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
+  target_compile_options(TribitConnectSetup PRIVATE /W4 /utf-8 /permissive-)
+  target_link_libraries(TribitConnectSetup PRIVATE windowsapp comctl32 crypt32 urlmon shell32 ole32)
+  set_target_properties(TribitConnectSetup PROPERTIES OUTPUT_NAME "TribitConnect-Setup" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
   # Card exporter for the browser mock (scripts/mock.ps1); not part of the package.
   add_executable(widget-mock EXCLUDE_FROM_ALL tools/widget_mock.cpp)

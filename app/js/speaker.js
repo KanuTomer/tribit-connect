@@ -15,7 +15,8 @@ const glyph={
   plus:(x,y)=>`<path d="M${x-5} ${y}H${x+5}M${x} ${y-5}V${y+5}"/>`,
   link:(x,y)=>`<path d="M${x} ${y}C${x+2.4} ${y-3.8} ${x+7.6} ${y-3.8} ${x+7.6} ${y}S${x+2.4} ${y+3.8} ${x} ${y}S${x-7.6} ${y-3.8} ${x-7.6} ${y}S${x-2.4} ${y+3.8} ${x} ${y}"/>`,
 };
-const BUTTONS=[['power',178],['bt',232],['minus',286],['play',326],['plus',366],['eq',424],['link',478]];
+// Spaced symmetrically about the centre of the body (x 320), like the product.
+const BUTTONS=[['power',172],['bt',226],['minus',280],['play',320],['plus',360],['eq',414],['link',468]];
 
 // The EQ ring takes the light's colour; the off light still reads as the active ring.
 const ring=light=>light===0?'#8a8c94':light>0?LIGHT[light]:'#4a4b51';

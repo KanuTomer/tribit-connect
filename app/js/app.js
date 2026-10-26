@@ -7,7 +7,7 @@
 'use strict';
 const S=Store,M=S.M,B=M.BANDS,N=B.freqs.length,$=id=>document.getElementById(id),esc=S.esc;
 const region=i=>i<3?'var(--low)':i<6?'var(--mid)':'var(--high)';
-const ui={mode:'listen',edit:null,draft:null,choosing:null,hot:-1,toast:null,pending:null,wpick:null,lastPick:null};
+const ui={mode:'listen',edit:null,draft:null,choosing:null,hot:-1,toast:null,pending:null,wpick:null,lastPick:null,library:false,removing:false};
 const aud={on:false,before:null};   // audition: what the speaker played before it started
 
 // ---- curves by band position --------------------------------------------------------------------
@@ -135,7 +135,8 @@ function units(){
     u.classList.toggle('lit',lit===i);u.classList.toggle('armed',armed);
     key.disabled=ro.disabled=off;key.setAttribute('aria-pressed',armed);
     key.setAttribute('aria-label',`Change what the ${Speaker.NAMES[i].toLowerCase()} selects (now ${nameOf(p)})`);
-    ro.querySelector('.num span').textContent=pad2(v.key?S.number(v.key):null);ro.querySelector('.nm').textContent=nameOf(p);
+    ro.querySelector('.num span').textContent=pad2(v.key?S.number(v.key):null);const nm=ro.querySelector('.nm');
+    if(nm.dataset.name!==nameOf(p)){nm.dataset.name=nameOf(p);nm.dataset.roll='';nm.textContent=nameOf(p);}rollName(nm,lit===i);
     const foot=`${led===null?'':`<span class="led ${led}"></span><span class="engr">${text}</span>`}${v.status==='stale'&&!busy&&!off?`<button class="mech" data-rewrite="${i}">Rewrite</button>`:''}`;
     const f=u.querySelector('.foot');if(f.dataset.html!==foot){f.dataset.html=foot;f.innerHTML=foot;}
   });
@@ -144,7 +145,10 @@ function units(){
 // Over the speaker while it is not connected: what is wrong and the two ways to fix it.
 function offlineCard(){
   const s=S.speaker,el=$('offline'),connecting=s.status==='connecting';
-  el.hidden=S.linked();if(el.hidden)return;
+  // Linked again: the card fades out before it is hidden.
+  if(S.linked()){if(!el.hidden&&!el.classList.contains('closing')){el.classList.add('closing');
+    setTimeout(()=>{el.classList.remove('closing');if(S.linked())el.hidden=true;},S.reduce()?0:220);}return;}
+  el.classList.remove('closing');el.hidden=false;
   const seen=s.lastSeen?new Date(s.lastSeen).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
   const why=connecting?'Opening the control link…':s.status==='unavailable'&&s.error?esc(s.error):
     'Turn it on and check it is paired with this PC. It takes one controller at a time, so close the Tribit app on your phone.';
@@ -174,45 +178,134 @@ function conduits(){
 }
 // ---- program bank -----------------------------------------------------------------------------------
 function bank(){
-  const active=S.linked()?S.active():null;
-  const key=(p,user)=>{const lights=lightsOf(p.key);return `<button class="pkey ${user?'user':''}"
-    data-key="${p.key}" draggable="true">
-    <span class="led"></span><span class="n">${pad2(S.number(p.key))}${hasDraft(p)?'<i class="dm" title="Unsaved draft"></i>':''}</span>${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}<span class="t">${esc(p.name)}</span></button>`;};
-  const html=`<div class="group factory"><span class="group-label">FACTORY</span><div class="row">${S.factory.map(p=>key(p,false)).join('')}</div></div>
-    <div class="group user"><span class="group-label">YOURS</span><div class="userwrap">
-    <button class="pager prev off" data-page="-1" aria-label="Earlier profiles"><svg width="8" height="12" viewBox="0 0 8 12"><path d="M6.5 1 1.5 6l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-    <div class="row userrow">${S.custom().map(p=>key(p,true)).join('')}
-    <button class="pkey add" data-new aria-label="New profile"><span class="n">+</span><span class="t">new</span></button></div>
-    <button class="pager next off" data-page="1" aria-label="Later profiles"><svg width="8" height="12" viewBox="0 0 8 12"><path d="M1.5 1 6.5 6l-5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div></div>`;
-  if($('keys').dataset.html!==html&&!reorder.key){$('keys').dataset.html=html;$('keys').innerHTML=html;}
-  $('keys').querySelectorAll('[data-key]').forEach(k=>{const p=S.find(k.dataset.key),on=active===p.key,ed=ui.mode==='edit'&&ui.edit===p.key;
+  const active=S.linked()?S.active():null,editKey=ui.mode==='edit'?ui.edit:null;
+  const key=(p,cls)=>{const lights=lightsOf(p.key);return `<button class="pkey ${cls}" data-key="${p.key}">
+    <span class="led"></span><span class="n">${pad2(S.number(p.key))}${hasDraft(p)?'<i class="dm" title="Unsaved draft"></i>':''}</span>${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}<span class="t" data-name="${esc(p.name)}">${esc(p.name)}</span></button>`;};
+  // YOURS is the first six saved profiles (the library's bank zone). A profile being edited that is
+  // not among them visits as a sixth key, so the editor always has a lit key. "+ new" is an editor
+  // key: it folds away on the home page (CSS), so the row never rebuilds when the mode changes.
+  const n=S.custom().length,onBank=M.bankProfiles(S.library),visit=editKey&&!S.find(editKey)?.factory&&!onBank.some(p=>p.key===editKey)?S.find(editKey):null;
+  const html=`<div class="group factory"><span class="group-label">FACTORY</span><div class="row">${S.factory.map(p=>key(p,'')).join('')}</div></div>
+    <div class="group user"><span class="group-label">YOURS</span><div class="row userrow">${onBank.map(p=>key(p,'user')).join('')}${visit?key(visit,'user visiting'):''}
+    <button class="pkey add" data-new aria-label="New profile"><span class="n">+</span><span class="t">new</span></button>
+    ${n?`<button class="pkey lib" data-library aria-controls="library"><svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true">${[0,8,16].map(x=>[0,9].map(y=>`<rect x="${x}" y="${y}" width="6" height="7" rx="1.2"/>`).join('')).join('')}</svg><span class="t lib-all">All ${n}</span><span class="t lib-close">Close</span></button>`:''}</div></div>`;
+  if($('keys').dataset.html!==html&&!drag.started){$('keys').dataset.html=html;$('keys').innerHTML=html;}
+  $('keys').querySelector('[data-new]').inert=ui.mode!=='edit';
+  const lib=$('keys').querySelector('[data-library]');if(lib){lib.setAttribute('aria-expanded',ui.library);lib.setAttribute('aria-label',ui.library?'Close the library':`Library, ${n} profiles`);}
+  $('keys').querySelectorAll('[data-key]').forEach(k=>{const p=S.find(k.dataset.key),on=active===p.key,ed=editKey===p.key;
     k.classList.toggle('playing',on);k.classList.toggle('busy',S.busy==='apply'&&ui.pending===p.key);k.classList.toggle('editing',ed);
-    k.setAttribute('aria-label',`${pad2(S.number(p.key))} ${p.name}${on?', playing':''}${hasDraft(p)?', unsaved draft':''}`);});
-  $('bank').classList.toggle('choosing',ui.choosing!==null);
-  const row=$('keys').querySelector('.userrow');fit(row);row.scrollLeft=userScroll;edges(row);
+    k.setAttribute('aria-label',`${pad2(S.number(p.key))} ${p.name}${on?', playing':''}${hasDraft(p)?', unsaved draft':''}`);
+    rollName(k.querySelector('.t'),on||ed);});
+  $('app').classList.toggle('choosing',ui.choosing!==null);
+  fit($('keys').querySelector('.userrow'));
   const p=playing();
   $('lstate').textContent=!S.linked()?'OFFLINE':viz.listening&&!viz.playing?'PAUSED':'';$('lstate').classList.toggle('off',!S.linked());
   const id=p?p.key+':'+(p.bands||[]).join():'none';
   if(id!==lastLcd){lastLcd=id;lplot.pen(p?curveByBand(p):Array(200).fill(0));}
-  $('editKey').innerHTML=ui.mode==='edit'?'DONE<small>listening</small>':'EDIT<small>sound</small>';
   $('editKey').setAttribute('aria-label',ui.mode==='edit'?'Done editing':'Edit sounds');
 }
-// The YOURS row keeps its scroll position across redraws and shows fades where keys are cut off.
-let userScroll=0;
-// When the keys overflow, the page keys appear and the row is sized to a whole number of keys.
+// Every program key shares one width (--kw), chosen so the keys fill the room the display and EDIT
+// key leave; in the editor the display folds away, so they grow (the width transitions). The room is
+// projected from the display's target width, so the keys move with it, not after it. When even the
+// narrowest keys do not fit, whole saved-profile keys drop from the end; the Library has them all.
 function fit(row){
-  const wrap=row.parentElement;wrap.classList.remove('paged');row.style.width='';
-  if(row.scrollWidth<=row.clientWidth+1)return;
-  wrap.classList.add('paged');
-  const gap=parseFloat(getComputedStyle(row).columnGap)||0,step=row.firstElementChild.offsetWidth+gap;
-  const room=wrap.clientWidth-2*(30+gap);   // both page keys, even while one is folded away
-  row.style.width=Math.max(1,Math.floor((room+gap)/step))*step-gap+'px';
+  const keys=$('keys'),wrap=document.querySelector('.lcdwrap'),lcd=$('lcd'),user=[...row.querySelectorAll('.pkey.user')];
+  const lcdW=ui.mode!=='edit'&&getComputedStyle(lcd).display!=='none'?Math.min(210,Math.max(150,innerWidth*.13))+14:0;
+  const room=keys.clientWidth+wrap.offsetWidth-(lcdW+$('editKey').offsetWidth);
+  const gap=parseFloat(getComputedStyle(row).columnGap)||8,more=ui.mode==='edit'?1:0,lib=row.querySelector('.pkey.lib')?46:0;
+  const width=n=>(room-lib-10-gap*(5+n+more))/(6+n+more);
+  let n=user.length;while(n>0&&width(n)<56)n--;
+  user.forEach((k,i)=>k.hidden=i>=n);
+  keys.style.setProperty('--kw',Math.max(56,Math.min(112,width(n))).toFixed(1)+'px');
 }
-function edges(row){
-  const max=row.scrollWidth-row.clientWidth,wrap=row.parentElement;
-  wrap.querySelector('.prev').classList.toggle('off',row.scrollLeft<=2);wrap.parentElement.classList.toggle('shifted',row.scrollLeft>2);wrap.querySelector('.next').classList.toggle('off',row.scrollLeft>=max-2);
+// A selected name too long for its key scrolls round in a loop; unselected names stay clamped.
+function rollName(box,on){
+  if(!box)return;const text=box.dataset.name??box.textContent;
+  if(!on||S.reduce()){if(box.dataset.roll){box.dataset.roll='';box.classList.remove('rolling');box.textContent=text;}return;}
+  if(box.dataset.roll===text)return;
+  box.classList.add('rolling');box.innerHTML=`<span class="roll"><span>${esc(text)}</span><span aria-hidden="true">${esc(text)}</span></span>`;
+  const w=box.querySelector('.roll span').offsetWidth;
+  if(w-24<=box.clientWidth){box.classList.remove('rolling');box.textContent=text;box.dataset.roll='';return;}
+  box.dataset.roll=text;const r=box.querySelector('.roll');r.style.setProperty('--d',w+'px');r.style.setProperty('--dur',(w/30).toFixed(1)+'s');
 }
-document.addEventListener('scroll',e=>{if(e.target.classList?.contains('userrow')){userScroll=e.target.scrollLeft;edges(e.target);}},true);
+// ---- library: a drawer of records under the bank ----------------------------------------------
+// Every saved profile is a record: a sleeve (number, curve, name) with its disc peeking out. The
+// first six sit in the front crate, ON THE BANK; dragging a record there puts it on the bank.
+const MINI_GRID=`M0 7.5H100M0 22.5H100${[1,2,3,4,5,6,7,8].map(i=>`M${(i*100/9).toFixed(1)} 0V30`).join('')}`;
+const mini=p=>{const v=curveByBand(p,null,48),line=v.map((d,k)=>(k?'L':'M')+(k/(v.length-1)*100).toFixed(1)+' '+(15-d*1.6).toFixed(1)).join('');
+  return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><path class="g" d="${MINI_GRID}"/><path class="z" d="M0 15H100"/>
+    <path class="f" d="${line}L100 30L0 30Z"/><path class="glow" d="${line}"/><path class="c" d="${line}"/></svg>`;};
+const record=p=>{const lights=lightsOf(p.key);return `<div class="rec" data-lkey="${p.key}" role="button" tabindex="0">
+  <span class="discwrap" aria-hidden="true"><svg class="disc" viewBox="0 0 100 100"><use href="#disc"/></svg></span>
+  <span class="sleeve"><span class="n">${pad2(S.number(p.key))}${hasDraft(p)?'<i class="dm" title="Unsaved draft"></i>':''}</span>
+    <span class="mini">${mini(p)}</span><span class="t" data-name="${esc(p.name)}">${esc(p.name)}</span>
+    ${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}</span></div>`;};
+function library(){
+  const el=$('library');el.classList.toggle('open',ui.library);el.inert=!ui.library;$('app').classList.toggle('lib-open',ui.library);
+  if(!ui.library&&!el.dataset.drawn)return;
+  const q=$('libsearch').value.trim().toLowerCase(),all=S.custom(),active=S.linked()?S.active():null;
+  const front=all.slice(0,M.BANK).map(record).join(''),back=all.slice(M.BANK).map(record).join('');
+  if((el.dataset.drawn!==front+back)&&!ldrag.started){el.dataset.drawn=front+back;$('libzone').innerHTML=front;$('librest').innerHTML=back;}
+  let shown=0;
+  el.querySelectorAll('[data-lkey]').forEach(c=>{const p=S.find(c.dataset.lkey);
+    c.hidden=!!q&&!(p.name.toLowerCase().includes(q)||pad2(S.number(p.key)).includes(q));shown+=!c.hidden;
+    const on=active===p.key,ed=ui.mode==='edit'&&ui.edit===p.key;
+    c.classList.toggle('playing',on);c.classList.toggle('spinning',on&&viz.listening&&viz.playing);c.classList.toggle('editing',ed);
+    rollName(c.querySelector('.t'),on||ed);});
+  for(const crate of el.querySelectorAll('.crate'))crate.hidden=!!q&&!crate.querySelector('[data-lkey]:not([hidden])');
+  el.querySelector('.crate.back').hidden||=!q&&all.length<=M.BANK;
+  $('libcount').textContent=q?`${shown} of ${all.length}`:all.length;$('libempty').hidden=!q||shown>0;
+}
+function toggleLibrary(open){ui.library=open;$('libsearch').value='';render();}
+$('libsearch').addEventListener('input',()=>library());
+// The bank's display folds away in the editor; once it has, the YOURS row knows its real width.
+$('lcd').addEventListener('transitionend',e=>{if(e.propertyName==='width')fit($('keys').querySelector('.userrow'));});
+// Records are arranged by dragging (not while searching). Slots are measured once when the drag
+// starts, and the target is the slot under the pointer: testing against cards that are still
+// gliding made them swap back and forth. The front crate always holds the first six.
+const ldrag={el:null,started:false,x0:0,y0:0,gx:0,gy:0,slots:[],at:-1,scroll0:0};
+function flip(boxes,change,skip){
+  const items=boxes.flatMap(b=>[...b.children]).filter(c=>c!==skip),before=new Map(items.map(c=>[c,c.getBoundingClientRect()]));
+  change();if(S.reduce())return;
+  items.forEach(c=>{const a=before.get(c),b=c.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(!dx&&!dy)return;
+    c.style.transition='none';c.style.transform=`translate(${dx}px,${dy}px)`;c.getBoundingClientRect();
+    c.style.transition='transform .24s var(--ease)';c.style.transform='';});
+}
+function follow(x,y){const d=ldrag,el=d.el;el.style.transform='';const r=el.getBoundingClientRect();el.style.transform=`translate(${x-d.gx-r.left}px,${y-d.gy-r.top}px)`;}
+// Puts the dragged record at list position `at`, keeping the bank's six in the front crate.
+function place(at){
+  const zone=$('libzone'),rest=$('librest'),el=ldrag.el,list=[...zone.children,...rest.children].filter(c=>c!==el);
+  list.splice(at,0,el);flip([zone,rest],()=>{list.forEach((c,i)=>(i<M.BANK?zone:rest).appendChild(c));},el);
+}
+document.addEventListener('pointerdown',e=>{
+  if(e.button!==0||ldrag.el)return;const c=e.target.closest('.rec[data-lkey]');if(!c)return;
+  e.preventDefault();   // no text selection, no native drag
+  if($('libsearch').value.trim())return;
+  Object.assign(ldrag,{el:c,started:false,x0:e.clientX,y0:e.clientY});
+});
+document.addEventListener('pointermove',e=>{
+  const d=ldrag;if(!d.el)return;
+  const body=$('libbody');
+  if(!d.started){if(Math.hypot(e.clientX-d.x0,e.clientY-d.y0)<6)return;d.started=true;
+    const r=d.el.getBoundingClientRect();d.gx=d.x0-r.left;d.gy=d.y0-r.top;d.el.classList.add('held');d.scroll0=body.scrollTop;
+    const recs=[...$('libzone').children,...$('librest').children];d.at=recs.indexOf(d.el);
+    d.slots=recs.map(c=>{const b=c.getBoundingClientRect();return {l:b.left,r:b.right,t:b.top+body.scrollTop,b:b.bottom+body.scrollTop};});}
+  e.preventDefault();const B=body.getBoundingClientRect();
+  if(e.clientY<B.top+30)body.scrollTop-=12;else if(e.clientY>B.bottom-30)body.scrollTop+=12;
+  const x=e.clientX,y=e.clientY+body.scrollTop;
+  let at=d.slots.findIndex(s=>x>=s.l&&x<=s.r&&y>=s.t&&y<=s.b);
+  if(at<0){let best=1e9;d.slots.forEach((s,i)=>{const dx=(s.l+s.r)/2-x,dy=(s.t+s.b)/2-y,dd=dx*dx+dy*dy;if(dd<best){best=dd;at=i;}});}
+  if(at!==d.at){d.at=at;place(at);}
+  follow(e.clientX,e.clientY);
+});
+document.addEventListener('pointerup',()=>{
+  const d=ldrag;if(!d.el)return;const el=d.el;d.el=null;if(!d.started)return;d.started=false;
+  const swallow=ev=>{ev.stopImmediatePropagation();ev.preventDefault();};
+  addEventListener('click',swallow,{capture:true,once:true});setTimeout(()=>removeEventListener('click',swallow,true),0);
+  el.style.transition='transform .18s var(--ease)';el.style.transform='';
+  setTimeout(()=>{el.classList.remove('held');el.removeAttribute('style');S.move(el.dataset.lkey,d.at);
+    $('library').dataset.drawn='';render();},S.reduce()?0:190);
+});
 // ---- the fader plate ------------------------------------------------------------------------------
 function buildPlate(){
   if($('channels').children.length)return;
@@ -233,7 +326,8 @@ function surface(){
   const p=editing();if(!p)return;
   buildPlate();
   const bands=editBands(),locked=!!p.factory;
-  if(document.activeElement!==$('pname'))$('pname').value=p.name;
+  // Keep a name being typed, but always show the right profile's name after switching profiles.
+  if(document.activeElement!==$('pname')||$('pname').dataset.key!==p.key){$('pname').value=p.name;$('pname').dataset.key=p.key;}
   $('pname').readOnly=locked;$('pname').tabIndex=locked?-1:0;$('channels').classList.toggle('locked',locked);$('display').classList.toggle('editable',!locked);
   annunciators(p);
   const v=locked?curveByBand(p):curveByBand(p,bands);
@@ -241,7 +335,7 @@ function surface(){
   dplot.marks(locked?null:bands);dplot.hot(ui.hot);
   // The amber dashes: what the speaker plays, when that is not what the plate shows.
   const pl=S.linked()?playing():null,same=pl&&(pl.factory?locked&&pl.key===p.key:M.sameBands(pl.bands,bands));
-  dplot.ghost(pl&&!same&&!draftPlaying()?curveByBand(pl):null);
+  dplot.ghost(pl&&!same&&!draftPlaying()&&!aud.on?curveByBand(pl):null);
   bands.forEach((b,i)=>{const slot=$('channels').querySelector(`[data-band="${i}"]`);slot.classList.toggle('locked',locked);
     slot.setAttribute('aria-valuenow',b);slot.setAttribute('aria-valuetext',`${b>0?'plus ':b<0?'minus ':''}${Math.abs(b)} decibels${locked?', approximate':''}`);slot.setAttribute('aria-readonly',locked);
     slot.querySelector('.cap').style.top=`calc(${(8-b)/16} * var(--fh))`;$('v'+i).innerHTML=`<i>${locked?'≈':b>0?'+':b<0?'−':''}</i>${Math.abs(b)}`;});
@@ -271,7 +365,7 @@ function render(){
   if(off&&aud.on){aud.on=false;aud.before=null;}
   if(off)ui.choosing=null;
   $('app').classList.toggle('offline',off);
-  instruments();speakerArt();bank();offlineCard();
+  instruments();speakerArt();bank();offlineCard();library();
   if(ui.mode==='listen')units();else surface();
   // An open list in the sheet would close if it were redrawn under the pointer.
   const f=document.activeElement;
@@ -307,6 +401,8 @@ function sheet(){
     <section><h4 class="engr">Appearance</h4><div class="dv-seg" role="group" aria-label="Appearance">${[['light','Light'],['dark','Dark'],['device','Windows']].map(([v,l])=>
       `<button data-theme-choice="${v}" aria-pressed="${Theme.choice===v}">${l}</button>`).join('')}</div></section>
     <div class="dv-row"><button class="mech" data-dv="retry">Reconnect</button><button class="mech" data-dv="bt">Bluetooth</button></div>
+    <div class="dv-remove">${ui.removing?`<p>Remove all profiles and settings from this PC?</p><div class="dv-row"><button class="mech danger" data-dv="remove-yes">Remove</button><button class="mech" data-dv="remove-no">Keep</button></div>`:
+      `<button class="dv-link" data-dv="remove">Remove my data…</button>`}</div>
     <p class="dv-note">${s.firmware?`Firmware ${esc(s.firmware)}. `:''}Rename, power off, factory reset and firmware updates: use the Tribit app.</p>`);
 }
 // Brings `el` in line with `html` node by node, keeping the elements that are still there, so
@@ -371,7 +467,6 @@ function setBand(i,v){
   surface();bank();
 }
 function newProfile(){
-  userScroll=1e6;   // the new key is at the end of the row
   if(ui.mode==='edit'&&!discardDraft())return;
   const from=ui.mode==='edit'?editing():playing();let key;
   if(from&&from.foreign){key=S.create({name:'From the speaker'});S.save(key,S.speaker.bands.slice());}
@@ -383,8 +478,33 @@ async function assign(i,key){
   const p=S.find(key);if(!p||p.foreign)return;
   const r=await S.assign(i,key);toast(r.ok?`${Speaker.NAMES[i]} now selects ${p.name}`:r.error);
 }
+// Right-clicking a record opens a small menu: Edit, Duplicate, Delete (Delete offers Undo).
+document.addEventListener('contextmenu',e=>{
+  const r=e.target.closest('.rec[data-lkey]');if(!r){hideCtx();return;}e.preventDefault();
+  const m=$('ctx');m.dataset.key=r.dataset.lkey;
+  m.innerHTML='<button data-ctx="edit" role="menuitem">Edit</button><button data-ctx="dup" role="menuitem">Duplicate</button><span class="sep"></span><button data-ctx="del" class="danger" role="menuitem">Delete</button>';
+  m.hidden=false;m.style.left=Math.min(e.clientX,innerWidth-m.offsetWidth-8)+'px';m.style.top=Math.min(e.clientY,innerHeight-m.offsetHeight-8)+'px';
+  m.querySelector('button').focus({preventScroll:true});
+});
+function hideCtx(){$('ctx').hidden=true;}
+$('libbody').addEventListener('scroll',hideCtx);
+// Deleting keeps Undo; a profile open in the editor hands over to its neighbour.
+function removeProfile(key){
+  const p=S.find(key),i=S.custom().findIndex(x=>x.key===key),open=ui.mode==='edit'&&ui.edit===key;
+  if(open)discardDraft();
+  const undo=S.remove(key),left=S.custom();
+  if(open){ui.edit=(left[i]||left[i-1]||S.factory[1]).key;openDraft(ui.edit);}
+  render();toast(`Deleted ${p.name}`,{label:'Undo',run:()=>{S.undo(undo);if(open){ui.edit=undo.profile.key;openDraft(ui.edit);}render();}});
+}
 document.addEventListener('click',async e=>{
   const t=e.target;
+  const cx=t.closest('[data-ctx]');
+  if(cx){const key=$('ctx').dataset.key,what=cx.dataset.ctx;hideCtx();
+    if(what==='edit'){toggleLibrary(false);ui.mode==='edit'?load(key):enterEdit(key);}
+    else if(what==='dup'){const k=S.create({from:key});toast(`Made ${S.find(k).name}`);}
+    else if(what==='del')removeProfile(key);
+    return;}
+  if(!t.closest('#ctx'))hideCtx();
   const win=t.closest('[data-win]');if(win){Bridge.send({type:'window',action:win.dataset.win});return;}
   const dv=t.closest('[data-dv]')?.dataset.dv;
   const th=t.closest('[data-theme-choice]');if(th){Theme.set(th.dataset.themeChoice);sheet();return;}
@@ -394,19 +514,23 @@ document.addEventListener('click',async e=>{
     else if(dv==='auto')S.setAutoShutdown(s.autoShutdown!==1).then(r=>!r.ok&&toast(r.error));
     else if(dv==='release')S.send({type:'setRelease',value:!S.settings.release});
     else if(dv==='logging')S.send({type:'setLogging',value:!S.settings.logging});
+    else if(dv==='remove'||dv==='remove-no'){ui.removing=dv==='remove';sheet();}
+    else if(dv==='remove-yes'){ui.removing=false;S.removeData();ui.mode==='edit'&&leaveEdit();toast('Your profiles and settings were removed');sheet();}
     else if(dv==='retry')S.send({type:'retry'});else if(dv==='bt')S.send({type:'openBluetooth'});
     return;}
   if(t.closest('#deviceBtn')){toggleSheet($('sheet').hidden);return;}
   if(!$('sheet').hidden&&!t.closest('#sheet')){ui.wpick=null;toggleSheet(false);}
-  if(t.closest('#editKey')){ui.mode==='edit'?leaveEdit():enterEdit();return;}
+  if(t.closest('#editKey')){ui.library=false;ui.mode==='edit'?leaveEdit():enterEdit();return;}
   const rw=t.closest('[data-rewrite]');if(rw){const i=+rw.dataset.rewrite;assign(i,S.slots()[i].key);return;}
   const arm=t.closest('[data-arm]');if(arm){const i=+arm.dataset.arm;ui.choosing=ui.choosing===i?null:i;render();return;}
   if(t.closest('[data-new]')){newProfile();return;}
-  // A page is the visible keys less one, so the last key seen stays in view.
-  const pg=t.closest('[data-page]');
-  if(pg){const row=pg.parentElement.querySelector('.userrow');const step=row.firstElementChild.offsetWidth+(parseFloat(getComputedStyle(row).columnGap)||0);
-    row.scrollBy({left:+pg.dataset.page*step*Math.max(1,Math.round(row.clientWidth/step)-1),behavior:S.reduce()?'auto':'smooth'});
-    setTimeout(()=>{userScroll=row.scrollLeft;edges(row);},600);return;}
+  if(t.closest('[data-library]')){toggleLibrary(!ui.library);return;}
+  const lc=t.closest('[data-lkey]');
+  if(lc){const p=S.find(lc.dataset.lkey);
+    if(ui.choosing!==null){const i=ui.choosing;ui.choosing=null;toggleLibrary(false);assign(i,p.key);return;}
+    if(ui.mode==='edit'){toggleLibrary(false);load(p.key);return;}
+    if(!S.linked()){toast('The speaker is not connected',{label:'Reconnect',run:()=>S.send({type:'retry'})});return;}
+    play(p);return;}
   const k=t.closest('[data-key]');
   if(k){k.classList.add('down');setTimeout(()=>k.classList.remove('down'),120);
     const p=S.find(k.dataset.key);
@@ -425,13 +549,12 @@ document.addEventListener('click',async e=>{
   else if(d==='dup'){discardDraft();const key=S.create({from:p.key});if(ui.draft)S.save(key,ui.draft.slice());ui.edit=key;ui.draft=null;render();$('pname').focus();$('pname').select();}
   else if(d==='audition'){if(aud.on)auditionStop(true);else auditionStart();render();}
   else if(d==='apply'){aud.on=false;aud.before=null;const r=await S.apply(p);toast(r.ok?`Playing ${p.name}`:r.error);render();}
-  else if(d==='del'){if(!discardDraft())return;const name=p.name,undo=S.remove(p.key);ui.edit=S.factory[1].key;render();
-    toast(`Deleted ${name}`,{label:'Undo',run:()=>{S.undo(undo);ui.edit=undo.profile.key;render();}});}
+  else if(d==='del')removeProfile(p.key);
 });
 $('pname').addEventListener('change',e=>{const p=editing();if(p&&!p.factory)S.rename(p.key,e.target.value);});
 $('pname').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Escape')e.target.blur();});
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if(!$('sheet').hidden){toggleSheet(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}}
+  if(e.key==='Escape'){if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}}
   const uk=e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&e.target.closest?.('.pkey.user');
   if(uk){e.preventDefault();const key=uk.dataset.key,i=S.custom().findIndex(p=>p.key===key);S.move(key,i+(e.key==='ArrowRight'?1:-1));
     $('keys').querySelector(`[data-key="${key}"]`)?.focus();return;}
@@ -468,43 +591,72 @@ document.addEventListener('pointerdown',e=>{
 // Double-clicking the cap itself zeroes the band; two quick presses on the track just move it.
 document.addEventListener('dblclick',e=>{const c=ui.mode==='edit'&&e.target.closest('.cap');if(c)setBand(+c.closest('.slot').dataset.band,0);});
 // Drag a program key onto a module (pressing the module's key, then a program, does the same).
-// A saved profile's key can also be dragged along the YOURS row to rearrange it: the other keys
-// slide aside to show where it will land, and the order is saved when it is dropped there.
-const reorder={key:null,el:null,to:-1};
-document.addEventListener('dragstart',e=>{const k=e.target.closest('[data-key]');if(!k)return;
-  e.dataTransfer.setData('text/plain',k.dataset.key);e.dataTransfer.effectAllowed='linkMove';
-  if(k.classList.contains('user')){reorder.key=k.dataset.key;reorder.el=k;reorder.to=-1;k.parentElement.classList.add('sorting');requestAnimationFrame(()=>k.classList.add('lifted'));}});
-document.addEventListener('dragover',e=>{
-  const u=e.target.closest('[data-unit]');if(u){e.preventDefault();e.dataTransfer.dropEffect='link';u.classList.add('drop');return;}
-  const row=reorder.key&&e.target.closest('.userrow');if(!row)return;
-  e.preventDefault();e.dataTransfer.dropEffect='move';
-  // Near either end of a paged row, the row scrolls along with the pointer.
-  const r=row.getBoundingClientRect();if(e.clientX<r.left+28)row.scrollLeft-=12;else if(e.clientX>r.right-28)row.scrollLeft+=12;
-  const others=[...row.querySelectorAll('.pkey.user')].filter(k=>k!==reorder.el);
-  let to=others.findIndex(k=>{const b=k.getBoundingClientRect();return e.clientX<b.left+b.width/2;});if(to<0)to=others.length;
-  if(to===reorder.to)return;reorder.to=to;
-  slide(row,()=>row.insertBefore(reorder.el,others[to]||row.querySelector('[data-new]')));
+// Dragging a program key moves the key itself (no browser drag image). Along the YOURS row it
+// rearranges saved profiles: the key follows the pointer and the others slide aside. Lifted out of
+// the row (or any factory key), it is carried over the light modules, and dropping it on one assigns it.
+const drag={el:null,key:null,user:false,x0:0,y0:0,cx:0,cy:0,started:false,mode:null,row:null,scroll0:0,from:0,to:0,step:0,others:[],gap:null,rect:null};
+function startDrag(e){
+  const d=drag,el=d.el;d.started=true;try{el.setPointerCapture(e.pointerId);}catch{}
+  d.rect=el.getBoundingClientRect();el.classList.add('held');
+  if(d.user){d.row=el.parentElement;d.scroll0=d.row.scrollLeft;d.row.classList.add('sorting');
+    const keys=[...d.row.querySelectorAll('.pkey.user:not([hidden])')];d.from=d.to=keys.indexOf(el);d.others=keys;
+    d.step=keys.length>1?keys[1].getBoundingClientRect().left-keys[0].getBoundingClientRect().left:d.rect.width;
+    d.mode='row';}else carry(e);
+}
+// Lift the key out of the row so it can travel over the modules; an empty slot holds its place.
+function carry(e){
+  const d=drag,el=d.el;if(d.mode==='carry')return;
+  d.others.forEach(k=>{if(k!==el)k.style.transform='';});
+  const r=el.getBoundingClientRect();d.gap=document.createElement('span');d.gap.className='pkey gap';el.before(d.gap);
+  document.body.append(el);el.classList.add('carried');Object.assign(el.style,{left:r.left+'px',top:r.top+'px',transform:''});
+  d.cx=e.clientX;d.cy=e.clientY;d.mode='carry';   // from here the key moves with the pointer from where it was lifted
+}
+function moveDrag(e){
+  const d=drag,el=d.el;let dx=e.clientX-d.x0,dy=e.clientY-d.y0;
+  if(d.mode==='row'&&dy<-48)carry(e);
+  if(d.mode==='carry'){
+    el.style.transform=`translate(${e.clientX-d.cx}px,${e.clientY-d.cy}px)`;
+    const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-unit]');
+    document.querySelectorAll('.unit').forEach(u=>u.classList.toggle('drop',u===hit&&!u.querySelector('.lampkey').disabled));
+    return;
+  }
+  const n=d.others.length;dx=Math.max(-d.from*d.step,Math.min((n-1-d.from)*d.step,dx));
+  el.style.transform=`translateX(${dx}px) translateY(-4px)`;
+  const to=Math.max(0,Math.min(n-1,d.from+Math.round(dx/d.step)));if(to===d.to)return;d.to=to;
+  d.others.forEach((k,i)=>{if(k===el)return;const shift=i>d.from&&i<=to?-d.step:i<d.from&&i>=to?d.step:0;k.style.transform=shift?`translateX(${shift}px)`:'';});
+}
+function endDrag(commit){
+  const d=drag,el=d.el;if(!el)return;
+  document.querySelectorAll('.unit.drop').forEach(u=>u.classList.remove('drop'));
+  const done=()=>{el.classList.remove('held','carried');el.removeAttribute('style');d.gap?.replaceWith(el);d.row?.classList.remove('sorting');
+    d.others.forEach(k=>k.style.transform='');Object.assign(d,{el:null,started:false,mode:null,row:null,gap:null,others:[]});
+    $('keys').dataset.html='';bank();};
+  if(!commit){done();return;}
+  if(d.mode==='carry'){const hit=commit.closest?.('[data-unit]');const key=d.key;done();if(hit&&!hit.querySelector('.lampkey').disabled)assign(+hit.dataset.unit,key);return;}
+  // Settle the key into its new slot, then save the order (the redraw renumbers the keys).
+  // The bank is the first six profiles, so a drop lands at the library position of the key it was dropped on.
+  const key=d.key,to=d.to,from=d.from,target=S.custom().findIndex(p=>p.key===d.others[to]?.dataset.key);el.style.transition='transform .18s var(--ease)';el.style.transform=`translateX(${(to-from)*d.step}px)`;
+  setTimeout(()=>{done();if(to!==from&&target>=0)S.move(key,target);},S.reduce()?0:180);
+}
+document.addEventListener('pointerdown',e=>{
+  if(e.button!==0||drag.el)return;const k=e.target.closest('.pkey[data-key]');if(!k)return;
+  Object.assign(drag,{el:k,key:k.dataset.key,user:k.classList.contains('user')&&!k.classList.contains('visiting'),x0:e.clientX,y0:e.clientY,started:false,mode:null,gap:null,others:[]});
 });
-// Moves keys in the DOM, then animates each from where it was (FLIP), so they glide aside.
-function slide(row,change){
-  const keys=[...row.querySelectorAll('.pkey')],before=new Map(keys.map(k=>[k,k.getBoundingClientRect().left]));
-  change();if(S.reduce())return;
-  keys.forEach(k=>{const dx=before.get(k)-k.getBoundingClientRect().left;if(!dx)return;
-    k.style.transition='none';k.style.transform=`translateX(${dx}px)`;k.getBoundingClientRect();
-    k.style.transition='transform .22s var(--ease)';k.style.transform='';});
-}
-function endReorder(commit){
-  const {key,el,to}=reorder;reorder.key=reorder.el=null;reorder.to=-1;if(!key)return;
-  el.classList.remove('lifted');el.parentElement?.classList.remove('sorting');
-  if(commit&&to>=0)S.move(key,to);
-  $('keys').dataset.html='';bank();   // redraw from the saved order (renumbered, or put back)
-}
-document.addEventListener('dragend',()=>endReorder(false));
-document.addEventListener('dragleave',e=>{const u=e.target.closest('[data-unit]');if(u&&!u.contains(e.relatedTarget))u.classList.remove('drop');});
-document.addEventListener('drop',e=>{
-  if(reorder.key&&e.target.closest('.userrow')){e.preventDefault();endReorder(true);return;}
-  const u=e.target.closest('[data-unit]');if(!u)return;e.preventDefault();u.classList.remove('drop');assign(+u.dataset.unit,e.dataTransfer.getData('text/plain'));});
-addEventListener('resize',()=>{if(ui.mode==='listen')conduits();const row=document.querySelector('.userrow');if(row){fit(row);edges(row);}});
+document.addEventListener('pointermove',e=>{
+  if(!drag.el)return;
+  if(!drag.started){if(Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)<6)return;startDrag(e);}
+  e.preventDefault();moveDrag(e);
+});
+document.addEventListener('pointerup',e=>{
+  if(!drag.el)return;if(!drag.started){drag.el=null;return;}
+  // The click that follows a drag must not also play the program.
+  const swallow=ev=>{ev.stopImmediatePropagation();ev.preventDefault();};
+  addEventListener('click',swallow,{capture:true,once:true});setTimeout(()=>removeEventListener('click',swallow,true),0);
+  endDrag(drag.mode==='carry'?(document.elementFromPoint(e.clientX,e.clientY)||document.body):true);
+});
+document.addEventListener('pointercancel',()=>{if(drag.started)endDrag(false);else drag.el=null;});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drag.started)endDrag(false);});
+addEventListener('resize',()=>{if(ui.mode==='listen')conduits();const row=document.querySelector('.userrow');if(row)fit(row);});
 // Re-measure once the speaker and modules have settled after a mode change.
 $('rig').addEventListener('animationend',e=>{if(e.target.classList.contains('spkwrap'))conduits();});
 render();

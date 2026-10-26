@@ -1,0 +1,4 @@
+// The installer's resources: the app icon and the payload (copied here by scripts/package.ps1).
+1 ICON "@TRIBIT_ICON@"
+101 RCDATA "@TRIBIT_SETUP@/payload.msix"
+102 RCDATA "@TRIBIT_SETUP@/payload.cer"

@@ -26,12 +26,20 @@ using namespace winrt::Windows::Data::Json;
 constexpr GUID ProviderClsid{0xa3fb741b,0xa71f,0x48b5,{0x90,0x4e,0x46,0x05,0xd8,0xd0,0x27,0x72}};
 constexpr UINT AppDispatchMessage=WM_APP+1, StateMessage=WM_APP+2;
 
+// Profiles and settings live in %LOCALAPPDATA%\Tribit Connect, outside the package, so uninstalling
+// or reinstalling never deletes them (the manifest turns off file-write virtualization, so this is
+// the real folder). The first run after the move copies them over from the package's LocalState.
 static std::filesystem::path data_folder() {
     PWSTR raw{};winrt::check_hresult(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&raw));
     std::filesystem::path path(raw);CoTaskMemFree(raw);
+    auto folder=path/L"Tribit Connect";std::error_code ec;std::filesystem::create_directories(folder,ec);
     UINT32 length{};GetCurrentPackageFamilyName(&length,nullptr);
-    if(length) { std::wstring family(length,L'\0');if(GetCurrentPackageFamilyName(&length,family.data())==ERROR_SUCCESS){family.resize(length-1);return path/L"Packages"/family/L"LocalState";} }
-    return path/L"TribitConnectDev";
+    if(length) { std::wstring family(length,L'\0');if(GetCurrentPackageFamilyName(&length,family.data())==ERROR_SUCCESS){family.resize(length-1);
+        auto old=path/L"Packages"/family/L"LocalState";
+        if(!std::filesystem::exists(folder/L"profiles.json",ec)&&std::filesystem::exists(old/L"profiles.json",ec))
+            for(auto name:{L"profiles.json",L"state.json",L"theme"})std::filesystem::copy_file(old/name,folder/name,std::filesystem::copy_options::skip_existing,ec);
+    } }
+    return folder;
 }
 static std::string read_file(const std::filesystem::path& path) {
     std::error_code ec;
@@ -362,6 +370,10 @@ public:
         if(type==L"setRelease"){release(m.GetNamedBoolean(L"value",false));update_widgets();refresh_editor();return;}
         if(type==L"setLogging"){logging=m.GetNamedBoolean(L"value",false);save(controller->snapshot());update_widgets();refresh_editor();return;}
         if(type==L"saveLibrary"){if(m.HasKey(L"library")){auto library=m.GetNamedValue(L"library");save_library(std::wstring(library.Stringify()));load_widget_slots(library);update_widgets();}return;}
+        // Settings > Remove my data: profiles, settings and the log go; the page has already reset itself.
+        if(type==L"removeData"){std::error_code ec;
+            for(auto name:{L"profiles.json",L"profiles.tmp",L"state.json",L"state.tmp",L"theme",L"diagnostics.log"})std::filesystem::remove(folder/name,ec);
+            logging=false;load_widget_slots(JsonValue::CreateNullValue());update_widgets();refresh_editor();return;}
         if(type==L"theme"){const bool dark=m.GetNamedBoolean(L"dark",false);web->theme(dark);
             try{std::ofstream(folder/L"theme",std::ios::binary|std::ios::trunc)<<(dark?"dark":"light");}catch(...){}return;}
         if(type==L"retry"){controller->send({Operation::Retry});return;}

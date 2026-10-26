@@ -45,6 +45,7 @@ function receive(m){
     case 'setAutoShutdown':write(m.id,s=>{s.autoShutdown=m.value?1:0;});break;
     case 'setRelease':sim.settings.release=!!m.value;publish();break;
     case 'setLogging':sim.settings.logging=!!m.value;publish();break;
+    case 'removeData':try{localStorage.removeItem(STORE);}catch{}break;
     case 'saveLibrary':try{localStorage.setItem(STORE,JSON.stringify(m.library));}catch{}break;
     case 'retry':connect(true);break;
     case 'openBluetooth':console.info('[mock] would open Windows Bluetooth settings');break;

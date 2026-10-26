@@ -8,6 +8,18 @@
 <link rel="stylesheet" href="styles/app.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <!-- A record for the library: shared by every sleeve. The label takes --disc-label (amber while playing). -->
+  <linearGradient id="minifill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d5ecab" stop-opacity=".22"/><stop offset="1" stop-color="#d5ecab" stop-opacity="0"/></linearGradient>
+  <symbol id="disc" viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="49.5" fill="#161617"/><circle cx="50" cy="50" r="48.8" fill="none" stroke="#ffffff38" stroke-width="1.2"/>
+    <g fill="none" stroke="#ffffff12" stroke-width=".7"><circle cx="50" cy="50" r="44"/><circle cx="50" cy="50" r="38.5"/><circle cx="50" cy="50" r="33"/><circle cx="50" cy="50" r="27.5"/></g>
+    <path d="M16 34A37 37 0 0 1 40 14" fill="none" stroke="#ffffff26" stroke-width="3.5" stroke-linecap="round"/>
+    <circle cx="50" cy="50" r="17" style="fill:var(--disc-label,#e6e0d1)"/>
+    <circle cx="50" cy="50" r="12" fill="none" stroke="#0000001f" stroke-width=".8"/>
+    <circle cx="50" cy="50" r="2.3" fill="#161617"/>
+  </symbol>
+</defs></svg>
 <div class="app" id="app">
   <header class="top">
     <div class="plate-name"><span class="model">XSound Plus 2</span></div>
@@ -40,14 +52,25 @@
     </div>
   </section>
 
+  <section class="library" id="library" aria-label="Your profiles" inert>
+    <button class="lib-tab" data-library aria-label="Close the library"><svg width="18" height="10" viewBox="0 0 18 10" aria-hidden="true"><path d="M2 2l7 6 7-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+    <div class="lib-head"><span class="engr">Yours</span><span class="count" id="libcount"></span><input id="libsearch" type="search" placeholder="Search" aria-label="Search profiles" autocomplete="off"></div>
+    <div class="lib-body" id="libbody">
+      <div class="crate front"><div class="crate-label"><span class="engr">On the bank</span></div><div class="crate-grid" id="libzone"></div></div>
+      <div class="crate back"><div class="crate-label"><span class="engr">Library</span></div><div class="crate-grid" id="librest"></div></div>
+      <p class="lib-empty" id="libempty" hidden>No profile matches.</p>
+    </div>
+  </section>
+
   <footer class="bank" id="bank">
     <span class="legend">PROGRAM</span>
     <div class="keys" id="keys"></div>
     <div class="lcdwrap"><div class="lcd" id="lcd"><span class="lstate" id="lstate"></span><svg id="lplot" aria-hidden="true"></svg></div>
-      <button class="bigkey" id="editKey"></button></div>
+      <button class="bigkey" id="editKey"><span class="ek edit">EDIT<small>sound</small></span><span class="ek done">DONE<small>listening</small></span></button></div>
   </footer>
 </div>
 <div class="sheet" id="sheet" hidden role="dialog" aria-label="Settings"></div>
+<div class="ctx" id="ctx" hidden role="menu" aria-label="Profile"></div>
 <script src="js/model.js"></script>
 <script src="js/mock-backend.js"></script>
 <script src="js/bridge.js"></script>
