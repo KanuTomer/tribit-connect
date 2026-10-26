@@ -4,7 +4,9 @@ $taskRoot=Split-Path $PSScriptRoot -Parent
 $taskVersion=([xml](Get-Content -LiteralPath (Join-Path $taskRoot 'packaging\AppxManifest.xml') -Raw)).Package.Identity.Version
 $taskExe=Join-Path $taskRoot 'build\bin\Release\TribitConnect.exe'
 if(-not(Test-Path -LiteralPath $taskExe)){throw 'Run scripts/build.ps1 first.'}
-$taskStage=Join-Path $taskRoot 'out\package'
+# Development registrations run from out\package; release builds stage separately, because Windows
+# keeps the registered package's files (its resources.pri) open while it is installed.
+$taskStage=Join-Path $taskRoot $(if($Register){'out\package'}else{'out\release'})
 $taskAssets=Join-Path $taskStage 'Assets'
 New-Item -Path $taskAssets,(Join-Path $taskStage 'Public') -ItemType Directory -Force | Out-Null
 # A registered development build runs from this folder; stop only that copy before replacing it.
@@ -86,6 +88,24 @@ $taskPackage=Join-Path $taskOut "TribitConnect_$taskVersion.msix"
 if($LASTEXITCODE -ne 0){throw 'MSIX validation/packaging failed.'}
 & (Join-Path $taskSdk 'signtool.exe') sign /fd SHA256 /sha1 $taskCert.Thumbprint /s My $taskPackage
 if($LASTEXITCODE -ne 0){throw 'MSIX signing failed.'}
-Export-Certificate -Cert $taskCert -FilePath (Join-Path $taskOut 'TribitConnect.Local.cer') -Force | Out-Null
+$taskCer=Join-Path $taskOut 'TribitConnect.Local.cer'
+Export-Certificate -Cert $taskCert -FilePath $taskCer -Force | Out-Null
 Write-Output "Signed package: $taskPackage"
+
+# The one-file installer: TribitConnect-Setup.exe embeds the package and certificate (src/setup.cpp).
+$taskSetup=Join-Path $taskRoot 'build\setup'
+New-Item -Path $taskSetup -ItemType Directory -Force | Out-Null
+Copy-Item -LiteralPath $taskPackage -Destination (Join-Path $taskSetup 'payload.msix') -Force
+Copy-Item -LiteralPath $taskCer -Destination (Join-Path $taskSetup 'payload.cer') -Force
+(Get-Item -LiteralPath (Join-Path $taskSetup 'setup.rc')).LastWriteTime=Get-Date   # the resource compiler does not track the payload
+$taskVswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+$taskVs=& $taskVswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+$taskCmake=Join-Path $taskVs 'Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe'
+& $taskCmake --build (Join-Path $taskRoot 'build') --config Release --target TribitConnectSetup
+if($LASTEXITCODE -ne 0){throw 'Setup build failed.'}
+$taskInstaller=Join-Path $taskOut 'TribitConnect-Setup.exe'
+Copy-Item -LiteralPath (Join-Path $taskRoot 'build\bin\Release\TribitConnect-Setup.exe') -Destination $taskInstaller -Force
+& (Join-Path $taskSdk 'signtool.exe') sign /fd SHA256 /sha1 $taskCert.Thumbprint /s My $taskInstaller
+if($LASTEXITCODE -ne 0){throw 'Setup signing failed.'}
+Write-Output "Installer: $taskInstaller"
 Write-Output 'The private signing key stays in the Windows certificate store; no PFX is exported.'

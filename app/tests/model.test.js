@@ -100,6 +100,20 @@ test('profiles can be rearranged; links and widget buttons follow the profile, n
   assert.equal(M.moveProfile(lib,keys[1],0),lib);
   assert.deepEqual(M.moveProfile(lib,keys[1],99).profiles.map(p=>p.name),['C','A','B']);
 });
+test('the bank is the first six profiles',()=>{
+  let lib=M.emptyLibrary();const keys=[];for(const n of 'ABCDEFG'){const r=M.createProfile(lib,{name:n});lib=r.library;keys.push(r.key);}
+  assert.deepEqual(M.bankProfiles(lib).map(p=>p.name),['A','B','C','D','E','F']);
+  lib=M.moveProfile(lib,keys[6],0);assert.deepEqual(M.bankProfiles(lib).map(p=>p.name),['G','A','B','C','D','E']);
+});
+test('copies are numbered after the original and placed next to it',()=>{
+  let lib=M.emptyLibrary();let r=M.createProfile(lib,{name:'Desk'});lib=r.library;const desk=r.key;
+  r=M.createProfile(lib,{name:'Other'});lib=r.library;
+  r=M.createProfile(lib,{from:desk});lib=r.library;const copy=r.key;
+  r=M.createProfile(lib,{from:copy});lib=r.library;
+  r=M.createProfile(lib,{from:desk});lib=r.library;
+  assert.deepEqual(lib.profiles.map(p=>p.name),['Desk','Desk copy 3','Desk copy','Desk copy 2','Other']);
+  r=M.createProfile(lib,{name:'x'.repeat(40)});assert.equal(M.findProfile(r.library,r.key).name.length,M.NAME_MAX);
+});
 test('widget buttons default to the presets and fall back when a profile goes',()=>{
   let lib=M.emptyLibrary();
   assert.deepEqual(M.widgetKeys(lib),M.WIDGET_DEFAULT);

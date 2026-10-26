@@ -25,7 +25,8 @@ addEventListener('pagehide',()=>{if(soon)persist();});
 Bridge.on(m=>{
   if(m.type!=='state')return;
   speaker=m.speaker;settings=m.settings||settings;
-  if(!library){library=m.library||seed();if(!m.library)persist();}
+  if(!library){library=m.library||seed();if(!m.library)persist();
+    library={...library,profiles:library.profiles.map(({pinned,...p})=>p)};}   // pinning was retired for the five-slot bank
   emit();
 });
 // Audition writes: unsaved curves go to the speaker one at a time and only the newest waiting
@@ -92,6 +93,8 @@ const Core={
   remove(key){const r=M.deleteProfile(library,key);library=r.library;persist();emit();return r.undo;},
   undo(u){library=M.undoDelete(library,u);persist();emit();},
   move(key,to){const next=M.moveProfile(library,key,to);if(next===library)return;library=next;persist();emit();},
+  // Settings > Remove my data: the page starts over with an empty library; the host deletes the files.
+  removeData(){library=M.emptyLibrary();try{localStorage.clear();}catch{}Bridge.send({type:'removeData'});emit();},
   widget:()=>M.widgetKeys(library),
   setWidget(i,key){library=M.setWidget(library,i,key);persist();emit();},
   setPrompt:(i,v)=>Bridge.request({type:'setPrompt',index:i,value:v}),
@@ -113,7 +116,7 @@ Core.transition=fn=>{
   if(Core.reduce()||document.hidden){fn();return;}
   clearTimeout(shift);app.classList.remove('arriving');app.classList.add('leaving');
   shift=setTimeout(()=>{app.classList.remove('leaving');fn();app.classList.add('arriving');
-    shift=setTimeout(()=>app.classList.remove('arriving'),700);},150);
+    shift=setTimeout(()=>app.classList.remove('arriving'),700);},280);   // long enough for the exits
 };
 Bridge.send({type:'ready'});
 root.Store=Core;

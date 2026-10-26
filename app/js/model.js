@@ -43,16 +43,23 @@ function bandsOf(profile){
 }
 
 // ---- Library edits (local only; nothing here touches the speaker) -----------------------
+const NAME_MAX=32;   // the name field's maxlength
+// A free name: the base itself, or the base numbered ("Desk copy", "Desk copy 2", …), within NAME_MAX.
 function uniqueName(library,base){
-  const names=new Set(library.profiles.map(p=>p.name));
-  if(!names.has(base))return base;
-  for(let n=2;;n++)if(!names.has(`${base} ${n}`))return `${base} ${n}`;
+  const names=new Set(library.profiles.map(p=>p.name)),fit=(b,tail)=>b.slice(0,NAME_MAX-tail.length).trimEnd()+tail;
+  if(!names.has(fit(base,'')))return fit(base,'');
+  for(let n=2;;n++){const name=fit(base,` ${n}`);if(!names.has(name))return name;}
 }
-function createProfile(library,{from=null,name}={}){
+// A copy is named after the original, never after another copy ("Desk copy copy" was the bug).
+const copyBase=name=>`${name.replace(/ copy( \d+)?$/,'')} copy`;
+// New profiles go right after the one they were made from (or `after`), otherwise at the end.
+function createProfile(library,{from=null,name,after=null}={}){
   const source=from?findProfile(library,from):null;
-  const profile={key:newKey(),name:uniqueName(library,name||(source?(source.factory?`My ${source.name}`:`${source.name} copy`):'Untitled')),
+  const profile={key:newKey(),name:uniqueName(library,name||(source?(source.factory?`My ${source.name}`:copyBase(source.name)):'Untitled')),
     bands:source?bandsOf(source):flat(),rev:1,basedOn:source?source.key:null,approx:!!(source&&(source.factory||source.approx))};
-  return {library:{...library,profiles:[...library.profiles,profile]},key:profile.key};
+  const list=library.profiles.slice(),at=list.findIndex(p=>p.key===(after||(source&&!source.factory?source.key:null)));
+  list.splice(at<0?list.length:at+1,0,profile);
+  return {library:{...library,profiles:list},key:profile.key};
 }
 function updateProfile(library,key,change){
   return {...library,profiles:library.profiles.map(p=>{
@@ -64,6 +71,10 @@ function updateProfile(library,key,change){
 }
 const setBand=(library,key,index,value)=>{const p=findProfile(library,key);if(!p||p.factory)return library;
   const bands=p.bands.slice();bands[index]=clampBand(value);return updateProfile(library,key,{bands});};
+// The program bank holds the first BANK saved profiles; the library holds them all, in one order
+// the user arranges by dragging.
+const BANK=6;
+const bankProfiles=library=>library.profiles.slice(0,BANK);
 // Saved profiles keep the order the user arranges; their numbers (07, 08, …) follow it.
 function moveProfile(library,key,to){
   const from=library.profiles.findIndex(p=>p.key===key);if(from<0)return library;
@@ -188,7 +199,7 @@ function widgetSlots(library){
 function setWidget(library,index,key){const keys=widgetKeys(library);keys[index]=key;return {...library,widget:keys};}
 
 const Model={BANDS,FACTORY,CUSTOM,emptyLibrary,findProfile,matchProfile,bandsOf,createProfile,updateProfile,setBand,resetProfile,renameProfile,
-  deleteProfile,undoDelete,activeKey,profileStatus,slotView,applyCommand,assignCommand,linkApplied,linkAssigned,sampleCurve,sameBands,clampBand,setDraft,moveProfile,
+  deleteProfile,undoDelete,activeKey,profileStatus,slotView,applyCommand,assignCommand,linkApplied,linkAssigned,sampleCurve,sameBands,clampBand,setDraft,moveProfile,BANK,bankProfiles,NAME_MAX,
   WIDGET_DEFAULT,widgetKeys,widgetSlots,setWidget};
 if(typeof module!=='undefined'&&module.exports)module.exports=Model;else root.Model=Model;
 })(typeof globalThis!=='undefined'?globalThis:this);

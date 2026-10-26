@@ -5,14 +5,17 @@ Windows controls for the Tribit XSound Plus 2 speaker: a Win + W widget and a co
 [Sound Connect](https://github.com/KanuTomer/Sound-Connect). Independent project; not affiliated
 with Tribit or Microsoft. MIT licensed.
 
-![Sound Lab, listening](design/sound-lab-listen.png)
+![Sound Lab, listening](docs/images/sound-lab-listen.png)
 
 ## What it does
 
 - **Programs.** Play the six factory EQ presets, or your own profiles, from the app or the widget.
 - **Custom EQ.** Nine-band editor (80 Hz to 13 kHz, ±8 dB) with faders and a drawable display.
   Profiles are saved on this PC; unsaved drafts are kept automatically until you save or revert.
-  **Audition** plays the curve on the speaker while you move the faders. Drag profiles to arrange them.
+  **Audition** plays the curve on the speaker while you move the faders.
+- **Library.** A drawer of all your profiles, shown as records, with search. The first six are
+  the ones on the program bank: drag a record into that row to put it there. Right-click a record
+  to edit, duplicate or delete it.
 - **The EQ button's lights.** The speaker's EQ button cycles through three lights (off, white,
   blue). Choose what each light plays, including your own curves; the speaker keeps them, even
   after a power cycle.
@@ -31,21 +34,54 @@ The speaker accepts one control connection at a time. While Tribit Connect holds
 app on your phone cannot connect; turn on **Let the phone app connect** in Settings, or close the
 app and widget first.
 
-![Sound Lab, editing](design/sound-lab-edit.png)
+![Sound Lab, editing](docs/images/sound-lab-edit.png)
 
-## Install a release
+## Install
 
-Requirements: Windows 11 x64, Microsoft.WindowsAppRuntime.2 2.5.1 or newer, the Windows Web
-Experience Pack (Widgets) and the WebView2 runtime (included with Windows 11).
-The package is self-signed, so trust its certificate once:
+1. Download **`TribitConnect-Setup.exe`** from
+   [Releases](https://github.com/KanuTomer/tribit-connect/releases) and run it.
+2. Choose **Yes** when Windows asks for permission. Setup trusts the app's publisher certificate,
+   installs the Windows App Runtime from Microsoft if it is missing, and installs the app.
+3. Pair the speaker in Windows Bluetooth settings. Open **Tribit Connect** from Start, or add
+   **XSound Plus 2** from Win + W > Add widgets.
 
-1. Download `TribitConnect_<version>.msix` and `TribitConnect.Local.cer` from
-   [Releases](https://github.com/KanuTomer/tribit-connect/releases).
+**Updating:** download the newer `TribitConnect-Setup.exe` and run it; it updates the app in place
+and keeps your profiles. Profiles from 0.3.0 and earlier move to the new data folder (below) on first
+launch.
+
+The app is not yet signed by a recognised publisher, so Windows SmartScreen may say "Windows
+protected your PC" when setup starts: choose **More info**, then **Run anyway**. Uninstall it from
+Settings > Apps like any other app.
+
+Requires Windows 11 x64 with the Windows Web Experience Pack (Widgets) and WebView2, both included
+with Windows 11.
+
+<details><summary>Manual install, without setup</summary>
+
+1. Download `TribitConnect_<version>.msix` and `TribitConnect.Local.cer` from the same release.
 2. Open an administrator PowerShell in the download folder and run
    `Import-Certificate -FilePath TribitConnect.Local.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople`.
-3. Open the `.msix` file and select **Install**.
-4. Pair the speaker in Windows Bluetooth settings. Open **Tribit Connect** from Start, or add
-   **XSound Plus 2** from Win + W > Add widgets.
+3. Install Microsoft.WindowsAppRuntime.2 2.5.1 or newer if it is missing, then open the `.msix`
+   and select **Install**.
+</details>
+
+## Your data
+
+Profiles, light assignments, widget buttons and settings are stored in
+`%LOCALAPPDATA%\Tribit Connect` (for example `C:\Users\<you>\AppData\Local\Tribit Connect`):
+
+| File | Contents |
+|---|---|
+| `profiles.json` | your saved profiles, drafts, their order, and the widget buttons |
+| `state.json` | the last values read from the speaker, and app settings |
+| `theme` | light or dark, so the window opens in the right colour |
+| `WebView2\` | the app window's browser cache (safe to delete) |
+| `diagnostics.log` | only when Diagnostic log is turned on |
+
+Uninstalling Tribit Connect keeps this folder, so reinstalling or updating never loses your
+profiles. Windows does not let packaged apps run anything when they are uninstalled, so there is
+no question at that point. To remove your data, use **Settings > Remove my data** in the app before
+uninstalling, or delete the folder afterwards.
 
 ## Develop
 
@@ -58,7 +94,8 @@ node --test app/tests/model.test.js    # frontend model tests
 ./scripts/package.ps1 -Register        # register the build in place for development
 ```
 
-Without `-Register`, `package.ps1` builds a signed MSIX and its certificate in `out/`.
+Without `-Register`, `package.ps1` builds a signed MSIX, its certificate and the one-file
+installer `TribitConnect-Setup.exe` ([src/setup.cpp](src/setup.cpp)) in `out/`.
 
 - **Sound Lab** is plain HTML, CSS and JavaScript in [app/](app/), hosted in WebView2 by
   [src/webview_host.hpp](src/webview_host.hpp). Open `app/index.html` directly in a browser to work on

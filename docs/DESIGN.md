@@ -51,7 +51,8 @@ Stage (listening)                       | Surface (editing)
   to the drawn speaker's EQ button      |   one dB scale (left), LOW/MID/HIGH brackets, transport
   offline card over speaker when needed |
 Program bank (168px, charcoal, always visible)
-  PROGRAM legend · FACTORY 01–06 · YOURS 07+ (paged, reorderable) + "+ new" · LCD (curve + spectrum) · EDIT/DONE
+  PROGRAM legend · FACTORY 01–06 · YOURS (first six profiles) + "+ new" (editor only) + "All N" (Library) · LCD (curve + spectrum; folds away in the editor) · EDIT/DONE
+Library drawer (slides up from behind the bank over row 2): ▾ tab · YOURS · count · search; crates ON THE BANK (first six) and LIBRARY, of records
 Settings sheet (overlay, right, 368px): Speaker · Windows · Appearance · Reconnect/Bluetooth · note
 ```
 
@@ -110,12 +111,40 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
   number (Archivo 700 24px) + name; amber LED strip above (`.led`), light dots top-right
   (`.dot i.l0/l1/l2`), amber draft dot after the number (`.dm`), `.editing` = inset orange rim,
   `.playing` = amber LED. Factory keys `--key`, user keys `--key-user`.
-- **YOURS row**: whole keys only. When it overflows, `.userwrap.paged` shows solid page keys
-  (`.pager`, 30px) either side and `fit()` sizes the row to an integer number of keys. A page key at its
-  end folds to width 0 (no padding!) and the YOURS label shifts with it (`.group.user.shifted`).
-  Scroll-snap per key. **No fades over keys, no partially covered keys, no wheel scrolling** (all rejected).
-  Reorder by HTML5 drag (FLIP `slide()`, `.lifted` dashed placeholder, `.sorting` disables snap) or
-  Alt+←/→; numbers follow order.
+- **YOURS row**: the first `M.BANK` (6) saved profiles in library order (`bankProfiles`); pinning was tried
+  and retired (copies inherited pins, and the limit was unclear). `fit()` hides whole keys from the end
+  only on narrow windows (`overflow:hidden`). Then `+ new`, an **editor-only** key that folds to width 0 on
+  the home page (CSS transition, `inert`, never rebuilt), and the slim **Library key** (`.pkey.lib`, 46px,
+  "All N" / "Close"). A profile opened in the editor from the library **visits** as a sixth key
+  (`.visiting`, user profiles only) so the editor always has a lit key; it is not part of the bank order.
+  Key width `clamp(56px,4.9vw,80px)` and LCD `clamp(150px,13vw,210px)` so six keys + Library fit at 1280 (fit() drops whole keys below that). The Library key latches pressed-in while open (no orange rim). The drawer never takes focus on open.
+- **Key drag (pointer events, never HTML5 DnD)**: native DnD drew a translucent OS drag image next to the
+  real key (rejected as "two images"). `drag` state: 6px threshold → the real key is `.held` (lifted,
+  shadow) and follows the pointer along the row; the others get `translateX(±step)` with a .2s ease; drop
+  settles the key (.18s) then `Store.move` to the library index of the key it landed on (the bank is a
+  subset). Lifting >48px up (or any factory key) switches to **carry**: the key is reparented to `body`
+  (`.carried`, fixed) leaving an invisible `.gap`, modules under the pointer get `.drop`, dropping assigns.
+  The click after a drag is swallowed (capture listener, removed next tick). Esc cancels. Alt+←/→ moves too.
+- **Library drawer** (`#library`, `ui.library`): a drawer that slides up from **behind the bank**
+  (`.bank` z-index 4, `.library` translateY(100%) ↔ none, .38s both ways, `visibility` delayed on close,
+  `inert` while closed). Close: the pull tab (▾) on its top edge, the Library key (reads Close), or Esc.
+  Two crates, one list in library order: **ON THE BANK** (`#libzone`, recessed well, first six; no hint text) and **LIBRARY** (`#librest`).
+- **Records** (`.rec`): sleeve (`--key-user`, key edge/drop, inset opening line) with number + draft dot,
+  `mini()` LCD curve, name, light dots; a vinyl disc (`<symbol id="disc">` in index.html, reused) peeks 16px
+  out of the top, rises 8px on hover and 28px when playing (label takes `--disc-label` = amber), and spins
+  (8 s/turn) only while `viz.listening && viz.playing`. Click plays (listen), opens (edit), or assigns
+  (while a light is armed). Search filters by name/number; empty crates hide.
+- **Record drag** (`ldrag`): `preventDefault` on pointerdown (no text selection); after 6px the record is
+  `.held` and follows the pointer (`follow()`); **slots are measured once at drag start** (scroll-adjusted)
+  and the target is the slot under the pointer (nearest centre otherwise). Testing against live, gliding
+  cards made them oscillate. `place()` reorders and rebalances six-into-front with a two-container FLIP.
+  Drop → `Store.move(key, slot)`. Disabled while searching.
+- **Rolling names** (`rollName(box,on)`): only on the selected item (playing/editing key or record, lit
+  light module) and only if it overflows: two copies in `.roll`, translateX(−width) at ~30 px/s, looping;
+  reduced motion → static.
+- **Ghost curve** (amber dashes: what the speaker plays) is hidden while Audition is lit; the speaker follows
+  the plate then, and the confirm lag made the line trail the faders.
+- **Arming a light** sets `.app.choosing`: bank keys and library sleeves pulse (`offer`).
 - **Assignment module** (`.unit`): engraved light name, recessed lamp key (`.lampkey .face`, the light's
   colour; lit = glow including the "off" light, which gets a neutral glow, never a box), 7-seg number +
   Doto name readout (content vertically centred), foot status only for exceptions.
@@ -154,7 +183,7 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 - `js/model.js`: pure, unit-tested (`node --test app/tests/model.test.js`). Library
   `{profiles:[{key,name,bands,rev,draft?,basedOn,approx}], links:{custom,slots[3]}, widget:[6 keys]}`.
   `activeKey` identifies the speaker's custom curve by band content. `slotView` → synced/stale/changed/unknown.
-  `moveProfile`, `setDraft`, `widgetSlots` (resolved for the host: factory `{preset}`, saved
+  `moveProfile`, `setDraft`, `bankProfiles`/`BANK`, `uniqueName` (copies named after the original, numbered, ≤ `NAME_MAX` 32), `createProfile({from,after})` (inserts after its source), `widgetSlots` (resolved for the host: factory `{preset}`, saved
   `{preset:254,name,bands}`).
 - `js/store.js`: the only writer. `persist()` sends `saveLibrary` with `widgetSlots` attached; drafts persist
   debounced 500 ms. Audition queue: single-flight, latest wins, restores through the same queue; `apply`
@@ -171,7 +200,13 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 - Durations: press 70–80 ms; lamp/LED/halo/wire 250–500 ms; mode change 150 ms out + ≤700 ms in;
   sheet open 300 ms / close 160 ms; picker grid-rows 300 ms; theme 400 ms; pen 700 ms; fader cap 450 ms.
 - Arrivals rise 10–12 px with `--ease`, staggered in reading order (modules 0/50/100 ms, channels
-  `--i`·22 ms + 60 ms). Leavings are short fades; nothing slides out far.
+  `--i`·22 ms + 60 ms). **Exits mirror them** (`.leaving`, 280 ms before the change): modules lift out,
+  the speaker and editor parts sink out (`liftout`/`sinkout`/`fadeout`, `forwards`), channels in reverse order.
+  Every element that appears must also have a way out (offline card `cardout`, sheet, toast, drawer,
+  mini speaker width/opacity). Animations on centred elements keep their centring transform (`cardin`).
+- The bank's program display folds as a shutter: its SVG has a fixed width, so nothing relayouts and the
+  spectrum bars keep running while it reopens.
+- Library crates share one 6-column grid that fills the drawer; record type scales with `cqw`.
 - Never animate by rebuilding. Never let geometry derived from a transformed element persist
   (measure layout, not boxes, during transitions).
 - `prefers-reduced-motion`: everything instant (global rule at the end of app.css); scroll behaviour `auto`.
@@ -223,4 +258,19 @@ curves render orange via `custom_artwork()`. The curve image blinking on change 
 - Factory programs are read-only; their curves are approximations (≈).
 - The visualizer analyses only this PC's audio to the default output when that output is the speaker;
   it never claims to know about phone playback.
-- No confirm dialogs, no redundant text, no texture, no fades over controls.
+- No confirm dialogs, no redundant text, no texture, no fades over controls, no OS drag images.
+- User data lives in `%LOCALAPPDATA%\Tribit Connect` (outside the package; manifest disables file-write
+  virtualization via `desktop6:FileSystemWriteVirtualization` + `unvirtualizedResources`). Nothing deletes it
+  except Settings > Remove my data (inline two-step, `removeData` message). `data_folder()` migrates the old
+  package LocalState once. MSIX uninstall cannot prompt; the README says so.
+
+## 11. Distribution
+
+`TribitConnect-Setup.exe` (`src/setup.cpp`, built by `scripts/package.ps1` after the MSIX it embeds as
+RCDATA 101/102): TaskDialog progress → if the cert is not in LocalMachine\TrustedPeople, relaunch self
+elevated with `--trust <cer>` (the only admin step) → if `Microsoft.WindowsAppRuntime.2` x64 ≥ 2.5.1 is
+missing, download Microsoft's pinned installer (aka.ms/windowsappsdk/2.5/2.5.1/…-x64.exe) and run `--quiet`
+→ `PackageManager.AddPackageAsync` (ForceApplicationShutdown | ForceUpdateFromAnyVersion) → offer Open
+(`shell:AppsFolder\Kanu.TribitConnect_3k1b1c9z5y0mg!App`). `--check <file>` reports without changing
+anything. Release builds stage in `out/release`; `out/package` is the dev registration (Windows keeps its
+resources.pri mapped). SmartScreen still warns for the self-signed setup; the real fix is Store or trusted signing.
