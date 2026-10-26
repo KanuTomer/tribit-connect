@@ -24,6 +24,16 @@ int main(){try{
     expect(frame&&frame->command==GetCountdown&&parser.rejected()==1,"Bad checksum must be dropped, next frame kept");
     expect(!parser.next(),"Nothing may remain");
 
+    // A light holding a custom curve, as probed on 2026-10-26: 03 <light> FE <9 bands>.
+    {
+        Eq custom{Custom};custom.bands={16,16,14,8,8,8,8,8,4};
+        auto write=eq_slots_write({Eq{XBassOff},Eq{XBass},custom});
+        Bytes expected;
+        for(const Bytes& data:{Bytes{0x03,0x00,0x00,0,0,0,0,0,0,0,0,0},Bytes{0x03,0x01,0x01,0,0,0,0,0,0,0,0,0},Bytes{0x03,0x02,0xFE,0x10,0x10,0x0E,0x08,0x08,0x08,0x08,0x08,0x04}}){
+            auto frame=encode(SetEqButtons,data);expected.insert(expected.end(),frame.begin(),frame.end());}
+        expect(write==expected,"Lights are written together; a custom light carries its bands, a preset light zeros");
+    }
+
     parser.feed(encode(SetEq,{},true));
     frame=parser.next();
     expect(frame&&frame->command==SetEq&&frame->data.empty(),"Set acknowledgement is an empty echo");

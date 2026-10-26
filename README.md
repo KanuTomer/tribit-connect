@@ -1,87 +1,95 @@
 # Tribit Connect
 
-Windows controls for the Tribit XSound Plus 2 speaker, modelled on
-[Sound Connect](https://github.com/KanuTomer/Sound-Connect). Independent project;
-not affiliated with Tribit or Microsoft. MIT licensed.
+Windows controls for the Tribit XSound Plus 2 speaker: a Win + W widget and a companion app,
+**Sound Lab**, with a custom EQ editor. Modelled on
+[Sound Connect](https://github.com/KanuTomer/Sound-Connect). Independent project; not affiliated
+with Tribit or Microsoft. MIT licensed.
 
-Status: early development build. A Win + W widget (medium and large) and a
-companion app, plus a protocol probe.
+![Sound Lab, listening](design/sound-lab-listen.png)
 
-- Battery, connection state and the six EQ presets (XBass Off, XBass, MaxSound
-  traditional, Rock, Audiobook, Jazz), with each preset's EQ curve.
-- Voice prompt beeps, auto shutdown and the EQ button's light-to-preset mapping
-  (companion app). Every change counts only once the speaker reports it back.
-- Not yet: the custom EQ editor, the shutdown countdown, and shutdown, factory reset
-  and firmware upgrade, which stay in the Tribit app.
+## What it does
 
-The speaker accepts one control connection at a time. While the widget or companion
-app holds it, the Tribit app on your phone cannot connect; turn on release in
-Settings or close the controls first.
+- **Programs.** Play the six factory EQ presets, or your own profiles, from the app or the widget.
+- **Custom EQ.** Nine-band editor (80 Hz to 13 kHz, ±8 dB) with faders and a drawable display.
+  Profiles are saved on this PC; unsaved drafts are kept automatically until you save or revert.
+  **Audition** plays the curve on the speaker while you move the faders. Drag profiles to arrange them.
+- **The EQ button's lights.** The speaker's EQ button cycles through three lights (off, white,
+  blue). Choose what each light plays, including your own curves; the speaker keeps them, even
+  after a power cycle.
+- **Widget.** Battery, connection and six program buttons. Any button can hold one of your
+  profiles (Settings → Windows).
+- **Speaker settings.** Voice prompt beeps and auto shutdown.
+- **Light and dark** appearance, or follow Windows.
+- **Visualizer.** When this PC plays through the speaker, faint spectrum bars run behind the curve
+  in the program display. It only sees audio from this PC, not from your phone.
+- Every change counts only once the speaker reports it back.
+
+Not supported, because their commands are unknown: renaming the speaker, the shutdown countdown,
+power off, factory reset and firmware updates. Use the Tribit app for those.
+
+The speaker accepts one control connection at a time. While Tribit Connect holds it, the Tribit
+app on your phone cannot connect; turn on **Let the phone app connect** in Settings, or close the
+app and widget first.
+
+![Sound Lab, editing](design/sound-lab-edit.png)
 
 ## Install a release
 
-Microsoft.WindowsAppRuntime.2 2.5.1 or newer and the Windows Web Experience Pack
-(Widgets) are required.
+Requirements: Windows 11 x64, Microsoft.WindowsAppRuntime.2 2.5.1 or newer, the Windows Web
+Experience Pack (Widgets) and the WebView2 runtime (included with Windows 11).
 The package is self-signed, so trust its certificate once:
 
 1. Download `TribitConnect_<version>.msix` and `TribitConnect.Local.cer` from
-   [Releases](https://github.com/KanuTomer/tribit-widget/releases).
+   [Releases](https://github.com/KanuTomer/tribit-connect/releases).
 2. Open an administrator PowerShell in the download folder and run
    `Import-Certificate -FilePath TribitConnect.Local.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople`.
 3. Open the `.msix` file and select **Install**.
-4. Add **XSound Plus 2** from Win + W > Add widgets.
+4. Pair the speaker in Windows Bluetooth settings. Open **Tribit Connect** from Start, or add
+   **XSound Plus 2** from Win + W > Add widgets.
 
-## Install for development
+## Develop
 
-Developer Mode, Windows Web Experience Pack and Microsoft.WindowsAppRuntime.2
-2.5.1 or newer are required.
+Requirements: Windows x64, Developer Mode, Visual Studio 2022 C++ Build Tools with the CMake
+component, the Windows SDK, and Node.js for the frontend tests.
 
 ```powershell
-./scripts/build.ps1 -Check
-./scripts/package.ps1 -Register
+./scripts/build.ps1 -Check            # fetch NuGet packages, build, run native tests
+node --test app/tests/model.test.js    # frontend model tests
+./scripts/package.ps1 -Register        # register the build in place for development
 ```
 
-Then add **XSound Plus 2** from Win + W > Add widgets, or open **Tribit Connect**
-from Start. Without `-Register`, `package.ps1` builds a self-signed MSIX instead.
+Without `-Register`, `package.ps1` builds a signed MSIX and its certificate in `out/`.
 
-## Widget mock
-
-For layout work, `./scripts/mock.ps1` exports every widget card (all sizes, pages and
-connection states) from the real card code in about five seconds and writes
-`build/mock/index.html`, which renders them with the Adaptive Cards renderer at the
-board's widget sizes, in dark or light theme. Navigation and preset buttons work, and
-each widget reports how much space is free or clipped. Refresh the page after each run.
-The mock approximates the Windows host (fonts, hover and rounding), so confirm the
-final result on the board with `package.ps1 -Register`.
+- **Sound Lab** is plain HTML, CSS and JavaScript in [app/](app/), hosted in WebView2 by
+  [src/webview_host.hpp](src/webview_host.hpp). Open `app/index.html` directly in a browser to work on
+  it against a simulated speaker; press the backtick key for the simulator's controls.
+- **Widget** cards come from [src/widget_card.hpp](src/widget_card.hpp). `./scripts/mock.ps1` renders
+  every card (sizes, pages, states) into `build/mock/index.html` with the Adaptive Cards renderer.
+- **Design rules** for both are in [docs/DESIGN.md](docs/DESIGN.md).
 
 ## Protocol
 
-The speaker is controlled over Bluetooth Classic RFCOMM channel 3 with a small
-checksummed frame format, decoded from an Android HCI snoop capture of the Tribit
-app. See [PROTOCOL.md](PROTOCOL.md). The scrubbed capture is in
-[captures/](captures/), so you can check the decoding or continue it. Open questions: the countdown-to-shutdown
-write, and the custom EQ band frequencies and limits.
+The speaker is controlled over Bluetooth Classic RFCOMM channel 3 with a small checksummed frame
+format, decoded from an Android HCI snoop capture of the Tribit app and confirmed from Windows.
+See [PROTOCOL.md](PROTOCOL.md). The scrubbed capture is in [captures/](captures/), so you can check
+the decoding or continue it.
 
 ## Probe
 
-Pair the speaker in Windows Bluetooth settings and close the Tribit app on your
-phone, because the speaker accepts one control connection at a time.
+`tribit-probe` reads and writes the protocol from the command line. Pair the speaker and close the
+Tribit app and Tribit Connect first, because the speaker accepts one control connection at a time.
 
 ```powershell
 ./scripts/build.ps1 -Check
 ./build/bin/Release/tribit-probe.exe
 ```
 
-By default the probe is read-only: it reads battery, firmware, current EQ, voice
-prompts, EQ button mapping and the not-yet-identified status values, and prints
-JSON. It never scans, pairs or retries.
+By default it is read-only: it reads battery, firmware, current EQ, voice prompts, the EQ button's
+lights and the unidentified status values, and prints JSON. It never scans, pairs or retries.
 
 - `--trace` prints every frame sent and received.
 - `--listen SECONDS` records frames the speaker sends on its own, for example when its buttons are pressed.
 - `--verify-voice-prompts` flips TWS Pairing Beep once, confirms it, then restores the original setting.
-- `--preset 0-5` applies an EQ preset. It is not restored afterwards.
-
-## Build requirements
-
-Windows x64, Visual Studio 2022 C++ Build Tools with the CMake component, and the
-Windows SDK.
+- `--preset 0-5` applies an EQ preset; `--custom-eq DB,...` applies nine custom bands;
+  `--button-slot LIGHT=PRESET|custom:DB,...` sets what a light selects. None of these restore the
+  previous value.

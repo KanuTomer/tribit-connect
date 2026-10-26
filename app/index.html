@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tribit Connect</title>
+<script src="js/theme.js"></script>
+<link rel="stylesheet" href="styles/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <header class="top">
+    <div class="plate-name"><span class="model">XSound Plus 2</span></div>
+    <div class="mini-speaker" id="mini" aria-hidden="true"></div>
+    <div class="instruments" id="instruments"></div>
+    <button class="mech" id="deviceBtn" aria-expanded="false">Settings</button>
+    <div class="winctl"><button data-win="minimize" aria-label="Minimize"><svg width="10" height="10"><path d="M0 5.5h10" stroke="currentColor"/></svg></button><button data-win="maximize" aria-label="Maximize"><svg width="10" height="10"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor"/></svg></button><button data-win="close" class="close" aria-label="Close"><svg width="10" height="10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor"/></svg></button></div>
+  </header>
+
+  <section class="stage" id="stage">
+    <div class="rig" id="rig">
+      <div class="units" id="units" role="group" aria-label="EQ button lights"></div>
+      <div class="spkwrap"><div class="spk" id="spk"></div><div class="offline-card" id="offline" role="status" hidden></div></div>
+      <svg class="conduits" id="conduits" aria-hidden="true"></svg>
+    </div>
+  </section>
+
+  <section class="surface" id="surface">
+    <div class="namebar">
+      <input id="pname" aria-label="Profile name" maxlength="32">
+      <div class="annunciators" id="ann" role="status"></div>
+    </div>
+    <div class="fplate" id="fplate">
+      <div class="lcdcell"><div class="display" id="display"><svg id="dplot" aria-label="Equalizer curve" role="img"></svg></div></div>
+      <div class="scale left" id="scaleL" aria-hidden="true"></div>
+      <div class="channels" id="channels"></div>
+      <div class="scale right" id="scaleR" aria-hidden="true"></div>
+      <div class="groups" aria-hidden="true"><span style="--c:var(--low)">Low</span><span style="--c:var(--mid)">Mid</span><span style="--c:var(--high)">High</span></div>
+      <div class="transport" id="transport"></div>
+    </div>
+  </section>
+
+  <footer class="bank" id="bank">
+    <span class="legend">PROGRAM</span>
+    <div class="keys" id="keys"></div>
+    <div class="lcdwrap"><div class="lcd" id="lcd"><span class="lstate" id="lstate"></span><svg id="lplot" aria-hidden="true"></svg></div>
+      <button class="bigkey" id="editKey"></button></div>
+  </footer>
+</div>
+<div class="sheet" id="sheet" hidden role="dialog" aria-label="Settings"></div>
+<script src="js/model.js"></script>
+<script src="js/mock-backend.js"></script>
+<script src="js/bridge.js"></script>
+<script src="js/store.js"></script>
+<script src="js/speaker.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

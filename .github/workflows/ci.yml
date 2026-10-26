@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+      - name: Frontend model tests
+        run: node --test app/tests/model.test.js
+      - name: Build and native tests
+        shell: pwsh
+        run: ./scripts/build.ps1 -Check

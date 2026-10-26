@@ -40,6 +40,34 @@ static void verify_voice_prompts(Speaker& speaker){
     catch(...){std::cerr<<"Voice prompt test changed TWS Pairing Beep but restoration was not confirmed. Check the Tribit app.\n";throw;}
 }
 
+// "3,0,0,0,0,0,0,0,-2" in dB -> nine band bytes (8 = 0 dB). The range is what we are probing,
+// so anything a byte can hold is allowed.
+static std::array<uint8_t,kEqBands> parse_bands(const std::string& text){
+    std::array<uint8_t,kEqBands> bands{};size_t count=0,start=0;
+    while(start<=text.size()){
+        auto end=text.find(',',start);if(end==std::string::npos)end=text.size();
+        if(count==kEqBands)throw std::invalid_argument("Give exactly nine band values.");
+        int db=std::stoi(text.substr(start,end-start));
+        if(db<-kBandZero||db>255-kBandZero)throw std::invalid_argument("Band values must fit in a byte.");
+        bands[count++]=static_cast<uint8_t>(db+kBandZero);start=end+1;
+    }
+    if(count!=kEqBands)throw std::invalid_argument("Give exactly nine band values.");
+    return bands;
+}
+// Rewrites all three button slots with one of them replaced, then reads them back.
+static void write_button_slot(Speaker& speaker,uint8_t light,const Eq& slot){
+    std::array<Eq,3> slots{};int seen=0;
+    for(auto& frame:speaker.request(GetEqButtons,{},3))
+        if(frame.data.size()==3+kEqBands&&frame.data[1]<3){
+            auto& s=slots[frame.data[1]];s.preset=frame.data[2];std::copy(frame.data.begin()+3,frame.data.end(),s.bands.begin());++seen;}
+    if(seen!=3)throw std::runtime_error("The current EQ button slots could not be read.");
+    std::cerr<<"Before:";for(auto& s:slots)std::cerr<<" "<<hex(std::span<const uint8_t>(&s.preset,1));std::cerr<<"\n";
+    slots[light]=slot;
+    speaker.send(eq_slots_write(slots));
+    if(speaker.collect(SetEqButtons,3,1500ms).size()!=3)throw std::runtime_error("The EQ button write was not acknowledged three times.");
+    std::this_thread::sleep_for(300ms);
+}
+
 static void snapshot(Speaker& speaker,const PairedSpeaker& device,bool verified_prompts,std::optional<uint8_t> applied,std::chrono::seconds listen){
     Snapshot s;
     auto info=s.read(speaker,GetDeviceInfo);
@@ -87,7 +115,8 @@ static void snapshot(Speaker& speaker,const PairedSpeaker& device,bool verified_
     for(size_t i=0;i<buttons.size();++i){
         std::cout<<(i?", ":"");
         if(auto slot=parse_button_slot(buttons[i].data))
-            std::cout<<"{\"light\": "<<quoted(kLightNames[slot->light])<<", \"preset\": "<<int(slot->preset)<<", \"name\": "<<quoted(preset_name(slot->preset))<<"}";
+            std::cout<<"{\"light\": "<<quoted(kLightNames[slot->light])<<", \"preset\": "<<int(slot->preset)<<", \"name\": "<<quoted(preset_name(slot->preset))
+                     <<", \"raw\": "<<quoted(hex(buttons[i].data))<<"}";
         else std::cout<<"{\"raw\": "<<quoted(hex(buttons[i].data))<<"}";
     }
     std::cout<<"]";
@@ -110,6 +139,8 @@ static void snapshot(Speaker& speaker,const PairedSpeaker& device,bool verified_
 int main(int argc,char** argv){
     std::optional<BTH_ADDR> address;
     std::optional<uint8_t> preset;
+    std::optional<std::array<uint8_t,kEqBands>> custom;
+    std::optional<std::pair<uint8_t,Eq>> button;
     bool verify_prompts=false,trace=false;
     std::chrono::seconds listen{0};
     for(int i=1;i<argc;++i){
@@ -121,14 +152,28 @@ int main(int argc,char** argv){
             else if(arg=="--verify-voice-prompts")verify_prompts=true;
             else if(arg=="--listen"){int s=std::stoi(value());if(s<1||s>120)throw std::invalid_argument("--listen takes 1 to 120 seconds.");listen=std::chrono::seconds(s);}
             else if(arg=="--preset"){int id=std::stoi(value());if(id<0||id>5)throw std::invalid_argument("--preset takes 0 to 5.");preset=static_cast<uint8_t>(id);}
+            else if(arg=="--custom-eq")custom=parse_bands(value());
+            else if(arg=="--button-slot"){
+                // LIGHT=PRESET or LIGHT=custom:DB,...  (light 0 off, 1 white, 2 blue)
+                auto spec=value();auto eq=spec.find('=');if(eq==std::string::npos)throw std::invalid_argument("Use --button-slot 2=4 or 2=custom:3,0,0,0,0,0,0,0,0.");
+                int light=std::stoi(spec.substr(0,eq));if(light<0||light>2)throw std::invalid_argument("Light is 0, 1 or 2.");
+                auto what=spec.substr(eq+1);Eq slot{};
+                if(what.rfind("custom:",0)==0){slot.preset=Custom;slot.bands=parse_bands(what.substr(7));}
+                else{int id=std::stoi(what);if(id<0||id>5)throw std::invalid_argument("Preset is 0 to 5.");slot.preset=static_cast<uint8_t>(id);}
+                button=std::pair{static_cast<uint8_t>(light),slot};
+            }
             else if(arg=="--help"){
                 std::cout<<"tribit-probe [--address AA:BB:CC:DD:EE:FF] [--trace] [--listen SECONDS] [--verify-voice-prompts] [--preset 0-5]\n"
+                           "             [--custom-eq DB,DB,DB,DB,DB,DB,DB,DB,DB] [--button-slot LIGHT=PRESET|LIGHT=custom:DB,...]\n"
                            "Default: read-only RFCOMM probe of a paired XSound Plus 2; never scans, pairs or retries.\n"
                            "--trace prints every frame sent and received to stderr.\n"
                            "--listen waits for frames the speaker sends on its own (press its buttons meanwhile).\n"
                            "--verify-voice-prompts flips TWS Pairing Beep once, confirms it, then restores the original setting.\n"
                            "--preset applies an EQ preset and is not restored afterwards: 0 XBass Off, 1 XBass,\n"
-                           "  2 Audiobook, 3 MaxSound traditional, 4 Rock, 5 Jazz.\n";
+                           "  2 Audiobook, 3 MaxSound traditional, 4 Rock, 5 Jazz.\n"
+                           "--custom-eq writes the custom EQ (nine gains in dB, lowest band first); not restored.\n"
+                           "--button-slot sets one EQ button light (0 off, 1 white, 2 blue) to a preset or to custom\n"
+                           "  bands, keeping the other two; not restored.\n";
                 return 0;
             }else{std::cerr<<"Unknown argument. Use --help.\n";return 2;}
         }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 2;}
@@ -144,6 +189,12 @@ int main(int argc,char** argv){
             if(speaker.request(SetEq,eq_payload(eq)).empty())throw std::runtime_error("Preset change was not acknowledged.");
             std::this_thread::sleep_for(300ms);
         }
+        if(custom){
+            Eq eq{Custom,*custom};
+            if(speaker.request(SetEq,eq_payload(eq)).empty())throw std::runtime_error("Custom EQ write was not acknowledged.");
+            std::this_thread::sleep_for(300ms);
+        }
+        if(button)write_button_slot(speaker,button->first,button->second);
         snapshot(speaker,device,verify_prompts,preset,listen);
         return 0;
     }catch(const std::exception& error){

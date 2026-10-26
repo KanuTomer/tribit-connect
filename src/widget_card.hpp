@@ -120,12 +120,13 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
             shown_if(box({text_json(bound("curveNote"),"Small","true",::quoted("Default"),"Center",2,::quoted("Default"))},curve_height),"!hasCurve")},curve_height),expanded?8:12);
         // As in Sound Connect: every button uses the host's neutral surface and hover, and the
         // selected one is marked by bold accent text. No images, so a switch redraws quickly.
-        const int per_row=3,height=expanded?60:56;Items rows;
-        for(size_t row=0;row<kPresetOrder.size();row+=per_row){Items chips;
-            for(size_t j=row;j<std::min(kPresetOrder.size(),row+per_row);++j){
-                int id=kPresetOrder[j];auto p="p"+std::to_string(id);if(j>row)chips.push_back(pad(4));
-                auto label=text_json(::quoted(preset_label(id)),"Small",bound(p+".subtle"),bound(p+".weight"),"Center",2,bound(p+".color"));
-                chips.push_back(col({tile({label},height,action_json("eq.preset."+std::to_string(id),bound(p+".title"),bound("enabled")),4,8)}));
+        // Labels come from the data: Sound Lab can put saved curves on any of the six buttons.
+        const size_t count=WidgetSlots{}.size();const int per_row=3,height=expanded?60:56;Items rows;
+        for(size_t row=0;row<count;row+=per_row){Items chips;
+            for(size_t j=row;j<std::min(count,row+per_row);++j){
+                auto p="s"+std::to_string(j);if(j>row)chips.push_back(pad(4));
+                auto label=text_json(bound(p+".label"),"Small",bound(p+".subtle"),bound(p+".weight"),"Center",2,bound(p+".color"));
+                chips.push_back(col({tile({label},height,action_json("eq.slot."+std::to_string(j),bound(p+".title"),bound("enabled")),4,8)}));
             }
             rows.push_back(gap(row?4:0));rows.push_back(columns(chips,height));
         }
@@ -178,7 +179,7 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
 }
 
 // Everything the template binds, for the current state. One object serves every page.
-static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false){
+static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false,const WidgetSlots& slots=default_slots()){
     // A background refresh on a working link changes nothing on the card: every update rebuilds it.
     const bool enabled=s.ready&&s.fresh,healthy=s.fresh&&s.ready;
     const auto page=view.page;
@@ -186,7 +187,7 @@ static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView&
     const bool stale=!s.fresh&&!s.pending;
     const std::string last_seen=seen_time(s.checked);
     // A click shows its result at once; the speaker's confirmation follows within a fraction of a second.
-    const int selected_preset=shown_preset(s,view);
+    const auto shown=shown_eq(s,view);
     const bool choosing=view.proposed.has_value()&&s.pending;
     bool valid=s.battery>=0&&s.battery<=100,low=battery_low(s.battery);
     std::vector<std::pair<std::string,std::string>> fields; // name -> encoded JSON value
@@ -208,20 +209,26 @@ static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView&
     flag("batterySubtle",!s.fresh);
     str("batteryColor",low?"Attention":"Default");
     str("status",healthy?std::string():status_label(s));
-    str("eqNote",s.preset==tribit::Custom&&!stale?std::string("Custom EQ active"):stale&&s.preset>=0?"Last: "+preset_label(s.preset):"");
-    // The curve follows the highlighted preset; while disconnected it shows the last one.
-    int curve=selected_preset>=0?selected_preset:s.preset;
-    auto art=icons.curves.find({curve,size==WidgetSize::Large?kCurveHeights[1]:kCurveHeights[0]});
-    bool has_curve=valid_preset(curve)&&art!=icons.curves.end();
-    flag("hasCurve",has_curve);
-    obj("curve",{{"light",::quoted(has_curve?art->second.first:"")},{"dark",::quoted(has_curve?art->second.second:"")}});
-    str("curveAlt",has_curve?"Equalizer curve for "+preset_label(curve)+", as drawn in the Tribit app":"");
-    str("curveNote",s.preset==tribit::Custom?"Custom EQ: edit it in the Tribit app":"Curve appears once a preset is read");
-    for(int id:kPresetOrder){
-        bool selected=selected_preset==id,last=stale&&s.preset==id;
-        obj("p"+std::to_string(id),{{"color",::quoted(selected?"Accent":"Default")},
+    // The curve follows the highlighted button; while disconnected it shows the last one.
+    const ShownEq curve=shown.preset>=0?shown:ShownEq{s.preset,s.bands};
+    const bool custom=curve.preset==tribit::Custom;
+    // A saved curve is named after the button holding it; any other custom curve is just "Custom".
+    std::string name=custom?"Custom curve":preset_label(curve.preset);
+    for(auto& slot:slots)if(custom&&same_eq(curve.preset,curve.bands,slot))name=slot.name;
+    str("eqNote",custom&&!stale?name:stale&&s.preset>=0?"Last: "+name:"");
+    const int curve_height=size==WidgetSize::Large?kCurveHeights[1]:kCurveHeights[0];
+    const std::pair<std::string,std::string>* art=nullptr;
+    if(custom){auto found=icons.custom_curves.find({curve.bands,curve_height});if(found!=icons.custom_curves.end())art=&found->second;}
+    else if(valid_preset(curve.preset)){auto found=icons.curves.find({curve.preset,curve_height});if(found!=icons.curves.end())art=&found->second;}
+    flag("hasCurve",art!=nullptr);
+    obj("curve",{{"light",::quoted(art?art->first:"")},{"dark",::quoted(art?art->second:"")}});
+    str("curveAlt",art?"Equalizer curve for "+name+(custom?"":", as drawn in the Tribit app"):"");
+    str("curveNote","Curve appears once a preset is read");
+    for(size_t j=0;j<slots.size();++j){auto& slot=slots[j];
+        bool selected=same_eq(shown.preset,shown.bands,slot),last=stale&&same_eq(s.preset,s.bands,slot);
+        obj("s"+std::to_string(j),{{"label",::quoted(slot.name)},{"color",::quoted(selected?"Accent":"Default")},
             {"weight",::quoted(selected||last?"Bolder":"Default")},{"subtle",!live&&!selected?"true":"false"},
-            {"title",::quoted(preset_label(id)+(selected?", selected":last?", last used":""))}});
+            {"title",::quoted(slot.name+(selected?", selected":last?", last used":""))}});
     }
     }else if(page==WidgetPage::More||page==WidgetPage::Prompts){
     // Speaker-side values are unknown while disconnected; show "--" rather than the last reading.
@@ -247,6 +254,6 @@ static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView&
     }
     std::string out="{";for(auto& [k,v]:fields){if(out.size()>1)out+=",";out+=::quoted(k)+":"+v;}return out+"}";
 }
-static WidgetCard make_card(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false){
-    return {card_template(size,view,icons),card_data(s,size,view,icons,logging)};
+static WidgetCard make_card(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false,const WidgetSlots& slots=default_slots()){
+    return {card_template(size,view,icons),card_data(s,size,view,icons,logging,slots)};
 }

@@ -18,24 +18,27 @@ Copy-Item -LiteralPath (Join-Path $taskRoot 'assets/icons/LUCIDE-LICENSE.txt') -
 Copy-Item -LiteralPath (Join-Path $taskRoot '.deps\nuget\widgets\license.txt') -Destination (Join-Path $taskStage 'WindowsAppSDK-LICENSE.txt') -Force
 Copy-Item -LiteralPath (Join-Path $taskRoot 'packaging\AppxManifest.xml') -Destination $taskStage -Force
 
+# The Sound Lab frontend (WebView2): only what the page loads, not the design boards or tests.
+$taskApp=Join-Path $taskStage 'app'
+if(Test-Path -LiteralPath $taskApp){Remove-Item -LiteralPath $taskApp -Recurse -Force}
+foreach($taskDir in 'js','styles','fonts'){New-Item -Path (Join-Path $taskApp $taskDir) -ItemType Directory -Force | Out-Null}
+$taskSource=Join-Path $taskRoot 'app'
+Copy-Item -LiteralPath (Join-Path $taskSource 'index.html') -Destination $taskApp
+Copy-Item -Path (Join-Path $taskSource 'js\*.js') -Destination (Join-Path $taskApp 'js')
+Copy-Item -LiteralPath (Join-Path $taskSource 'styles\app.css') -Destination (Join-Path $taskApp 'styles')
+foreach($taskFont in 'archivo-latin-wdth-normal.woff2','doto-latin-800-normal.woff2','DSEG7Classic-Bold.woff2','archivo-LICENSE.txt','doto-LICENSE.txt','dseg-LICENSE.txt'){
+    Copy-Item -LiteralPath (Join-Path $taskSource "fonts\$taskFont") -Destination (Join-Path $taskApp 'fonts')
+}
+
 # Generate application icons and a clearly illustrative picker preview.
 Add-Type -AssemblyName System.Drawing
 $taskIcons=Join-Path $taskStage 'Public\Icons'
 if(Test-Path -LiteralPath $taskIcons){Get-ChildItem -LiteralPath $taskIcons -Filter '*.png' | Remove-Item}
 & (Join-Path $PSScriptRoot 'export-icons.ps1') -Destination $taskIcons
-$taskLogoSource=[System.Drawing.Bitmap]::FromFile((Join-Path $taskStage 'Public\Icons\speaker-accent.png'))
-foreach($taskSize in 44,50,150){
-    $taskBitmap=[System.Drawing.Bitmap]::new($taskSize,$taskSize)
-    $taskGraphics=[System.Drawing.Graphics]::FromImage($taskBitmap)
-    $taskGraphics.SmoothingMode=[System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-    $taskGraphics.Clear([System.Drawing.Color]::Transparent)
-    $taskGraphics.InterpolationMode=[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $taskGraphics.DrawImage($taskLogoSource,0,0,$taskSize,$taskSize)
-    $taskName=if($taskSize -eq 50){'StoreLogo.png'}else{"Logo$taskSize.png"}
-    $taskBitmap.Save((Join-Path $taskAssets $taskName),[System.Drawing.Imaging.ImageFormat]::Png)
-    $taskGraphics.Dispose();$taskBitmap.Dispose()
-}
-$taskLogoSource.Dispose()
+# The app logo is drawn at each size (scripts/draw-logo.ps1).
+. (Join-Path $PSScriptRoot 'draw-logo.ps1')
+Get-ChildItem -LiteralPath $taskAssets -Filter '*Logo*.png' | Remove-Item
+Save-PackageLogos $taskAssets
 $taskBitmap=[System.Drawing.Bitmap]::new(600,400)
 $taskGraphics=[System.Drawing.Graphics]::FromImage($taskBitmap)
 $taskGraphics.Clear([System.Drawing.ColorTranslator]::FromHtml('#24262F'))
@@ -58,6 +61,15 @@ $taskBitmap.Save((Join-Path $taskAssets 'Preview.png'),[System.Drawing.Imaging.I
 $taskSmallFont.Dispose();$taskBrush.Dispose();$taskFont.Dispose();$taskGraphics.Dispose();$taskBitmap.Dispose()
 Copy-Item -LiteralPath (Join-Path $taskAssets 'StoreLogo.png') -Destination (Join-Path $taskStage 'Public\Icon.png') -Force
 
+$taskSdk=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin\10.0.26100.0\x64'
+# Index the scale and target-size logo variants; without resources.pri Windows ignores them
+# and plates the taskbar icon in the accent colour.
+$taskPri=Join-Path $taskRoot 'build\priconfig.xml'
+& (Join-Path $taskSdk 'makepri.exe') createconfig /cf $taskPri /dq en-US /pv 10.0.0 /o | Out-Null
+if($LASTEXITCODE -ne 0){throw 'makepri createconfig failed.'}
+& (Join-Path $taskSdk 'makepri.exe') new /pr $taskStage /cf $taskPri /mn (Join-Path $taskStage 'AppxManifest.xml') /of (Join-Path $taskStage 'resources.pri') /o | Out-Null
+if($LASTEXITCODE -ne 0){throw 'makepri new failed.'}
+
 if($Register){
     # Developer Mode registers the staged folder in place; no certificate is created or trusted.
     Add-AppxPackage -Register (Join-Path $taskStage 'AppxManifest.xml') -ForceApplicationShutdown
@@ -66,7 +78,6 @@ if($Register){
     Write-Output "Registered Tribit Connect $($taskInstalled.Version) from $taskStage. Add XSound Plus 2 from Win + W > Add widgets."
     return
 }
-$taskSdk=Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin\10.0.26100.0\x64'
 $taskCert=Get-ChildItem Cert:\CurrentUser\My | Where-Object {$_.Subject -eq 'CN=TribitConnect.Local' -and $_.HasPrivateKey -and $_.NotAfter -gt (Get-Date).AddDays(7)} | Sort-Object NotAfter -Descending | Select-Object -First 1
 if(-not $taskCert){$taskCert=New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=TribitConnect.Local' -CertStoreLocation Cert:\CurrentUser\My -KeyExportPolicy NonExportable -NotAfter (Get-Date).AddYears(1)}
 $taskOut=Join-Path $taskRoot 'out'
