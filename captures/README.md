@@ -7,7 +7,9 @@ The Android HCI snoop log that [PROTOCOL.md](../PROTOCOL.md) was decoded from, r
 
 The capture was reduced with [tools/scrub_btsnoop.py](../tools/scrub_btsnoop.py). Only the speaker's RFCOMM control channel (DLCI 6, server channel 3) and the RFCOMM multiplexer channel are kept. Everything else was removed: HCI commands and events (device addresses, names, link keys), SDP, audio, the hands-free channel and other devices.
 
-To record your own capture:
+**Own a different Tribit speaker?** [Add your speaker](https://tribit-connect-submit.vercel.app/) walks you through recording a capture and sends it, cleaned in your browser. No GitHub account needed. Sound Lab links there from Settings.
+
+To record your own capture by hand:
 1. On Android, turn on **Enable Bluetooth HCI snoop log** in Developer options.
 2. Turn Bluetooth off and on.
 3. Use the Tribit app.

@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
 & $taskCmake --build (Join-Path $taskRoot 'build') --config $Configuration --target tribit-probe TribitConnect --parallel 2
 if ($LASTEXITCODE -ne 0) { throw 'Build failed.' }
 if($Check){
-    & $taskCmake --build (Join-Path $taskRoot 'build') --config $Configuration --target tribit-protocol-tests tribit-core-tests --parallel 2
+    & $taskCmake --build (Join-Path $taskRoot 'build') --config $Configuration --target tribit-protocol-tests tribit-core-tests tribit-update-tests --parallel 2
     if($LASTEXITCODE -ne 0){throw 'Test build failed.'}
     $taskCtest=Join-Path (Split-Path $taskCmake -Parent) 'ctest.exe'
     & $taskCtest --test-dir (Join-Path $taskRoot 'build') -C $Configuration --output-on-failure

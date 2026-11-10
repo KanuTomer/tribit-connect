@@ -6,6 +6,8 @@
 //   2. installs the Windows App Runtime the package depends on, if missing, from Microsoft's
 //      official pinned installer;
 //   3. installs (or updates) the package for the current user, and offers to open the app.
+// `/update` is the app's updater: only the progress window, and the app reopens when it is done
+// (a failure still shows why).
 // `--check <file>` writes what it would do, without changing anything (used for testing).
 #include <windows.h>
 #include <commctrl.h>
@@ -79,6 +81,7 @@ static DWORD run_and_wait(const std::wstring& file,const std::wstring& args,bool
 // ---- the dialog: one progress page, then a result page -------------------------------------------
 struct Setup {
     HWND dialog{};std::wstring error;bool done{};
+    bool quiet{};   // /update: the app's updater; only the progress window, then the app reopens
     fs::path folder=fs::temp_directory_path()/L"TribitConnectSetup";
     void step(const wchar_t* text){if(dialog)SendMessageW(dialog,TDM_SET_ELEMENT_TEXT,TDE_CONTENT,reinterpret_cast<LPARAM>(text));}
     void work(){
@@ -100,7 +103,7 @@ struct Setup {
                 step(L"Installing the Windows App Runtime…");
                 if(run_and_wait(exe.wstring(),L"--quiet",false,dialog)!=0&&!runtime_present())throw std::runtime_error("The Windows App Runtime could not be installed.");
             }
-            step(L"Installing Tribit Connect…");
+            step(quiet?L"Updating Tribit Connect. It reopens in a moment.":L"Installing Tribit Connect…");
             write(msix,resource(kPayloadMsix));
             auto result=PackageManager().AddPackageAsync(winrt::Windows::Foundation::Uri(L"file:///"+msix.generic_wstring()),nullptr,
                 DeploymentOptions::ForceApplicationShutdown|DeploymentOptions::ForceUpdateFromAnyVersion).get();
@@ -117,7 +120,10 @@ static HRESULT CALLBACK result_proc(HWND,UINT msg,WPARAM wp,LPARAM,LONG_PTR){
     if(msg==TDN_BUTTON_CLICKED&&wp==kOpen)ShellExecuteW(nullptr,L"open",(std::wstring(L"shell:AppsFolder\\")+kAppFamily+L"!App").c_str(),nullptr,nullptr,SW_SHOWNORMAL);
     return S_OK;
 }
+static void open_app(){ShellExecuteW(nullptr,L"open",(std::wstring(L"shell:AppsFolder\\")+kAppFamily+L"!App").c_str(),nullptr,nullptr,SW_SHOWNORMAL);}
 void Setup::finish(){
+    // An update that worked needs no page: the app reopens where it was. A failure says why, as setup does.
+    if(quiet&&error.empty()){open_app();SendMessageW(dialog,TDM_ENABLE_BUTTON,IDCANCEL,TRUE);SendMessageW(dialog,TDM_CLICK_BUTTON,IDCANCEL,0);return;}
     static TASKDIALOG_BUTTON open{kOpen,L"Open Tribit Connect"};
     static TASKDIALOGCONFIG page{sizeof(page)};static std::wstring content;
     page.hwndParent=nullptr;page.dwFlags=TDF_ALLOW_DIALOG_CANCELLATION|TDF_SIZE_TO_CONTENT;page.pszWindowTitle=kApp;page.pfCallback=result_proc;
@@ -150,11 +156,12 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
         }catch(const std::exception& e){out<<L"error "<<e.what()<<L"\n";}
         return 0;
     }
+    app.quiet=argc==2&&std::wstring(argv[1])==L"/update";
     INITCOMMONCONTROLSEX icc{sizeof(icc),ICC_PROGRESS_CLASS};InitCommonControlsEx(&icc);
     TASKDIALOGCONFIG page{sizeof(page)};
     page.dwFlags=TDF_SHOW_MARQUEE_PROGRESS_BAR|TDF_SIZE_TO_CONTENT|TDF_CALLBACK_TIMER;page.pszWindowTitle=kApp;
     page.pszMainIcon=MAKEINTRESOURCEW(1);page.hInstance=GetModuleHandleW(nullptr);
-    page.pszMainInstruction=L"Installing Tribit Connect";page.pszContent=L"Getting ready…";
+    page.pszMainInstruction=app.quiet?L"Updating Tribit Connect":L"Installing Tribit Connect";page.pszContent=L"Getting ready…";
     page.dwCommonButtons=TDCBF_CANCEL_BUTTON;page.pfCallback=progress_proc;
     TaskDialogIndirect(&page,nullptr,nullptr,nullptr);
     return app.error.empty()?0:1;

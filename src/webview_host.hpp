@@ -26,6 +26,8 @@ public:
     std::function<void(const std::wstring&)> on_message; // JSON text from the page
     std::function<void()> on_closed;
     std::function<void(HRESULT)> on_failed;              // WebView2 could not start (runtime missing)
+    std::function<bool()> on_close;                      // true: closing hides the window (close to tray)
+    std::function<void(bool)> on_shown;                  // the window was shown (true) or hidden (false)
 
     WebViewHost(std::filesystem::path content,std::filesystem::path user_data,bool dark=false):content_(std::move(content)),user_data_(std::move(user_data)),dark_(dark){
         WNDCLASSW wc{};wc.lpfnWndProc=proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"TribitConnect.SoundLab";
@@ -42,7 +44,11 @@ public:
         start();
     }
     ~WebViewHost(){if(window)DestroyWindow(window);}
-    void show(){if(IsIconic(window))ShowWindow(window,SW_RESTORE);else ShowWindow(window,SW_SHOW);SetForegroundWindow(window);}
+    void show(){const bool was=visible();if(IsIconic(window))ShowWindow(window,SW_RESTORE);else ShowWindow(window,SW_SHOW);SetForegroundWindow(window);
+        if(controller_)controller_->put_IsVisible(TRUE);if(!was&&on_shown)on_shown(true);}
+    // Hidden in the tray: the page is told it is hidden (document.hidden), so it pauses like a closed window.
+    void hide(){if(!visible())return;ShowWindow(window,SW_HIDE);if(controller_)controller_->put_IsVisible(FALSE);if(on_shown)on_shown(false);}
+    bool visible()const{return window&&IsWindowVisible(window);}
     // Messages wait until the page has loaded its bridge.
     void post(const std::wstring& json){if(view_&&ready_)view_->PostWebMessageAsJson(json.c_str());else if(pending_.size()<64)pending_.push_back(json);}
     void page_ready(){ready_=true;for(auto& m:pending_)view_->PostWebMessageAsJson(m.c_str());pending_.clear();}
@@ -105,6 +111,7 @@ private:
             LPWSTR uri{};args->get_Uri(&uri);std::wstring u=uri?uri:L"";CoTaskMemFree(uri);
             if(u.rfind(L"https://app.tribit/",0)!=0)args->put_Cancel(TRUE);return S_OK;}).get(),&token);
         resize();
+        if(!visible())controller_->put_IsVisible(FALSE);   // started in the tray
         view_->Navigate(L"https://app.tribit/index.html");
     }
     void resize(){if(!controller_)return;RECT r{};GetClientRect(window,&r);controller_->put_Bounds(r);}
@@ -134,7 +141,7 @@ private:
         case WM_SIZE:self->resize();return 0;
         case WM_MOVE:case WM_MOVING:if(self->controller_)self->controller_->NotifyParentWindowPositionChanged();break;
         case WM_ACTIVATE:if(self->controller_&&LOWORD(wp)!=WA_INACTIVE)self->controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);break;
-        case WM_CLOSE:DestroyWindow(hwnd);return 0;
+        case WM_CLOSE:if(self->on_close&&self->on_close()){self->hide();return 0;}DestroyWindow(hwnd);return 0;
         case WM_DESTROY:
             if(self->controller_){self->controller_->Close();self->controller_=nullptr;self->view_=nullptr;}
             self->window=nullptr;

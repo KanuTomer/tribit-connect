@@ -5,6 +5,58 @@ const M=require('../js/model.js');
 
 const speaker=(over={})=>({connected:true,preset:1,bands:[0,0,0,0,0,0,0,0,0],buttons:[{preset:0},{preset:1},{preset:3}],...over});
 
+test('the Speakers page shows only when the app cannot carry on by itself',()=>{
+  const one=[{address:'A',supported:true}],two=[{address:'A',supported:true},{address:'B',supported:true}];
+  assert.equal(M.rackReason({linked:true,status:'connected',list:one}),null);
+  // a short drop, or a reconnect in progress, keeps the instrument
+  assert.equal(M.rackReason({linked:false,status:'disconnected',downFor:1000,list:one}),null);
+  assert.equal(M.rackReason({linked:false,status:'connecting',downFor:9000,list:one}),null);
+  assert.equal(M.rackReason({linked:false,status:'disconnected',downFor:M.RACK_GRACE,list:one}),'down');
+  assert.equal(M.rackReason({linked:false,status:'unavailable',downFor:5000}),'down');
+  // a hidden window (where the app releases the speaker on purpose) never shows it
+  assert.equal(M.rackReason({linked:false,status:'disconnected',downFor:9000,hidden:true}),null);
+  // two supported speakers and no choice yet: ask, even while one is linked
+  assert.equal(M.rackReason({linked:true,status:'connected',list:two}),'choose');
+  assert.equal(M.rackReason({linked:true,status:'connected',list:two,chosen:true}),null);
+});
+
+test('each speaker keeps its own widget buttons',()=>{
+  let lib=M.emptyLibrary();
+  lib=M.setWidget(lib,0,'f5','A');
+  assert.equal(M.widgetKeys(lib,'A')[0],'f5');
+  assert.equal(M.widgetKeys(lib,'B')[0],M.WIDGET_DEFAULT[0]);   // another speaker is untouched
+  lib=M.setWidget(lib,1,'f4','B');
+  assert.equal(M.widgetKeys(lib,'A')[1],M.WIDGET_DEFAULT[1]);
+  assert.deepEqual(Object.keys(M.widgetSlotsBy(lib)).sort(),['A','B']);
+  // buttons from before 0.7.1 carry over to a speaker that has none of its own yet
+  const old={...M.emptyLibrary(),widget:['f2','f1','f3','f4','f0','f5']};
+  assert.equal(M.widgetKeys(old,'C')[0],'f2');
+});
+
+test('launch decides at once, with no grace and no flash of the instrument',()=>{
+  const one=[{address:'A',supported:true}];
+  // the first attempt has not finished: nothing is shown about the speaker yet
+  assert.equal(M.rackReason({linked:false,status:'disconnected',booting:true,list:one}),null);
+  // it finished and the speaker is not linked: straight to the page
+  assert.equal(M.rackReason({linked:false,status:'disconnected',launch:true,list:one}),'down');
+  assert.equal(M.rackReason({linked:true,status:'connected',launch:true,list:one}),null);
+  assert.equal(M.rackReason({linked:false,status:'connecting',launch:true,list:one}),null);
+});
+
+test('only a busy speaker offers Try again; nothing says Reconnect',()=>{
+  assert.equal(M.dropReason('busy').key,'retry');
+  assert.equal(M.dropReason('off').key,'bt');
+  assert.equal(M.dropReason('bluetooth','Bluetooth is off.').hint,'Bluetooth is off.');
+  assert.equal(M.dropReason('released').key,null);
+  for(const r of ['busy','off','bluetooth','released',''])assert.doesNotMatch(JSON.stringify(M.dropReason(r)),/Reconnect/);
+});
+
+test('the rack lists the remembered speaker first, then supported, then the rest',()=>{
+  const list=[{address:'C',supported:false},{address:'B',supported:true},{address:'A',supported:true}];
+  assert.deepEqual(M.rackOrder(list,'A').map(d=>d.address),['A','B','C']);
+  assert.deepEqual(M.rackOrder(list,'').map(d=>d.address),['B','A','C']);
+});
+
 test('factory presets cannot be edited',()=>{
   const lib=M.emptyLibrary();
   assert.equal(M.setBand(lib,'f1',0,3),lib);

@@ -3,7 +3,8 @@
 (function(root){
 'use strict';
 const M=Model,subs=new Set();
-let speaker=null,library=null,settings={};
+let speaker=null,library=null,settings={},speakers=null,bootOver=false;
+setTimeout(()=>{bootOver=true;emit();},4000);
 const emit=()=>subs.forEach(fn=>fn());
 // The app starts with an empty library; the browser mock gets a few profiles to work with.
 function seed(){
@@ -18,11 +19,16 @@ function seed(){
 }
 // The host also reads the widget's buttons from here, resolved, so it never needs the model.
 let soon=0;
-function persist(){clearTimeout(soon);soon=0;Bridge.send({type:'saveLibrary',library:{...library,widgetSlots:M.widgetSlots(library)}});}
+// The speaker in use: its widget buttons are the ones shown and edited.
+const here=()=>speaker?.address||speakers?.address||'';
+function persist(){clearTimeout(soon);soon=0;
+  Bridge.send({type:'saveLibrary',library:{...library,widgetSlots:M.widgetSlots(library,here()),widgetSlotsBy:M.widgetSlotsBy(library)}});}
 // Drafts change with every fader step; they are written once the hand stops.
 function persistSoon(){clearTimeout(soon);soon=setTimeout(persist,500);}
 addEventListener('pagehide',()=>{if(soon)persist();});
 Bridge.on(m=>{
+  // Paired Tribit speakers (Speakers page), with the address the host remembers.
+  if(m.type==='speakers'){speakers={list:m.list||[],address:m.address||'',chosen:!!m.chosen};emit();return;}
   if(m.type!=='state')return;
   speaker=m.speaker;settings=m.settings||settings;
   if(!library){library=m.library||seed();if(!m.library)persist();
@@ -48,7 +54,24 @@ const Core={
   audition(cmd){aud.want={type:'apply',...cmd,bands:cmd.bands?cmd.bands.slice():undefined};if(!aud.busy)pump();},
   get auditioning(){return aud.busy;},
   onAuditionError:null,
-  get speaker(){return speaker;},get library(){return library;},get settings(){return settings;},
+  get speaker(){return speaker;},get library(){return library;},get settings(){return settings;},get speakers(){return speakers;},
+  listSpeakers:()=>Bridge.send({type:'listSpeakers'}),
+  // Kept by the host (state.json), so two paired speakers are asked about once, not every launch.
+  get chosen(){return !!(settings.chosen||speakers?.chosen);},
+  // connect=false only records the choice (the speaker already in use).
+  choose(address,connect=true){settings={...settings,chosen:true};if(speakers)speakers={...speakers,chosen:true};
+    if(connect){if(speakers)speakers={...speakers,address};Bridge.send({type:'chooseSpeaker',address});}else Bridge.send({type:'markChosen'});emit();},
+  // The first connect attempt after start has finished (the page decides what to show only then).
+  // A host that never says so is not waited on for more than a few seconds.
+  get settled(){return !!speaker&&(speaker.settled!==false||bootOver);},
+  get bootOver(){return bootOver;},
+  // Updates (host: updates.hpp).
+  checkUpdate:()=>Bridge.send({type:'checkUpdate'}),
+  installUpdate:()=>Bridge.send({type:'installUpdate'}),
+  setCheckUpdates:v=>{settings={...settings,checkUpdates:v};Bridge.send({type:'setCheckUpdates',value:v});emit();},
+  setTray:v=>{settings={...settings,tray:v};Bridge.send({type:'setTray',value:v});emit();},
+  // Windows owns the startup task and may refuse; the switch shows what the host reports back.
+  setStartup:v=>Bridge.send({type:'setStartup',value:v}),
   ready:()=>!!speaker&&!!library,
   linked:()=>!!speaker&&speaker.connected&&speaker.status!=='connecting',
   find:key=>key==='custom'?{key:'custom',name:'Custom',factory:false,bands:speaker?.bands||[0,0,0,0,0,0,0,0,0],foreign:true}:M.findProfile(library,key),
@@ -95,8 +118,8 @@ const Core={
   move(key,to){const next=M.moveProfile(library,key,to);if(next===library)return;library=next;persist();emit();},
   // Settings > Remove my data: the page starts over with an empty library; the host deletes the files.
   removeData(){library=M.emptyLibrary();try{localStorage.clear();}catch{}Bridge.send({type:'removeData'});emit();},
-  widget:()=>M.widgetKeys(library),
-  setWidget(i,key){library=M.setWidget(library,i,key);persist();emit();},
+  widget:()=>M.widgetKeys(library,here()),
+  setWidget(i,key){library=M.setWidget(library,i,key,here());persist();emit();},
   setPrompt:(i,v)=>Bridge.request({type:'setPrompt',index:i,value:v}),
   setAutoShutdown:v=>Bridge.request({type:'setAutoShutdown',value:v}),
   send:m=>Bridge.send(m),

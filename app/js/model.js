@@ -192,14 +192,59 @@ function sampleCurve(profile,count=160,lo=60,hi=16000){
 // whose profile was deleted falls back to its preset. The host gets them resolved (factory
 // buttons keep the widget's own preset names, saved ones carry their name and curve).
 const WIDGET_DEFAULT=['f0','f1','f3','f4','f2','f5'];
-function widgetKeys(library){const w=library.widget||[];return WIDGET_DEFAULT.map((d,i)=>w[i]&&findProfile(library,w[i])?w[i]:d);}
-function widgetSlots(library){
-  return widgetKeys(library).map(key=>{const p=findProfile(library,key);return p.factory?{preset:p.id}:{preset:CUSTOM,name:p.name,bands:p.bands.slice()};});
+// The widget's six buttons belong to a speaker (`address`): each paired speaker keeps its own, under
+// library.widgetBy. A speaker without its own starts from library.widget (the buttons from before
+// 0.7.1, or the defaults).
+function widgetKeys(library,address){
+  const own=address&&library.widgetBy?.[address],w=own||library.widget||[];
+  return WIDGET_DEFAULT.map((d,i)=>w[i]&&findProfile(library,w[i])?w[i]:d);
 }
-function setWidget(library,index,key){const keys=widgetKeys(library);keys[index]=key;return {...library,widget:keys};}
+function widgetSlots(library,address){
+  return widgetKeys(library,address).map(key=>{const p=findProfile(library,key);return p.factory?{preset:p.id}:{preset:CUSTOM,name:p.name,bands:p.bands.slice()};});
+}
+function setWidget(library,index,key,address){
+  const keys=widgetKeys(library,address);keys[index]=key;
+  return address?{...library,widgetBy:{...library.widgetBy,[address]:keys}}:{...library,widget:keys};
+}
+// Every speaker's buttons, resolved, for the host (which shows the speaker in use).
+function widgetSlotsBy(library){
+  return Object.fromEntries(Object.keys(library.widgetBy||{}).map(a=>[a,widgetSlots(library,a)]));
+}
 
-const Model={BANDS,FACTORY,CUSTOM,emptyLibrary,findProfile,matchProfile,bandsOf,createProfile,updateProfile,setBand,resetProfile,renameProfile,
+// ---- the Speakers page --------------------------------------------------------------------------
+// Paired Tribit speakers in rack order: the remembered one, then others the app supports, then the rest.
+function rackOrder(list,address){
+  const rank=d=>d.address===address?0:d.supported?1:2;
+  return (list||[]).map((d,i)=>[d,i]).sort((a,b)=>rank(a[0])-rank(b[0])||a[1]-b[1]).map(x=>x[0]);
+}
+// A drop shorter than this (a glitch, or the host's own quick recheck) keeps the instrument.
+const RACK_GRACE=3000;
+// Why the page should be showing, or null. It stays out of the way unless the app cannot know which
+// speaker to use ('choose') or the speaker has been gone past the grace period ('down'). The app's own
+// idle release only happens while the window is hidden, and a hidden window never shows the page.
+// At launch (`launch`) there is no grace: the first attempt has already settled, so a speaker that is
+// not linked goes straight to the page instead of showing the instrument first. While `booting` (the
+// first attempt has not finished) nothing is decided.
+function rackReason({linked,status,hidden,downFor=0,list,chosen,booting=false,launch=false}){
+  if(booting||hidden)return null;
+  if(list&&!chosen&&list.filter(d=>d.supported).length>=2)return 'choose';
+  if(linked||status==='connecting')return null;
+  return launch||downFor>=RACK_GRACE?'down':null;
+}
+// What to say when there is no link, and the one key that can help. Try again only helps when Windows
+// has the speaker but its controls are held elsewhere; a speaker that is off needs turning on, which
+// no button here can do ("Reconnect" was misleading: the app never reconnects Bluetooth itself).
+function dropReason(reason,error){
+  switch(reason){
+    case 'busy':return {word:'Controls busy',hint:'It takes one controller at a time. Close the Tribit app on your phone, then try again.',key:'retry'};
+    case 'bluetooth':return {word:'Bluetooth unavailable',hint:error||'Turn on Bluetooth in Windows settings.',key:'bt'};
+    case 'off':return {word:'Off or out of range',hint:'Turn it on. Windows connects it, and the app opens by itself.',key:'bt'};
+    default:return {word:'Not connected',hint:'',key:null};
+  }
+}
+
+const Model={rackOrder,rackReason,dropReason,RACK_GRACE,BANDS,FACTORY,CUSTOM,emptyLibrary,findProfile,matchProfile,bandsOf,createProfile,updateProfile,setBand,resetProfile,renameProfile,
   deleteProfile,undoDelete,activeKey,profileStatus,slotView,applyCommand,assignCommand,linkApplied,linkAssigned,sampleCurve,sameBands,clampBand,setDraft,moveProfile,BANK,bankProfiles,NAME_MAX,
-  WIDGET_DEFAULT,widgetKeys,widgetSlots,setWidget};
+  WIDGET_DEFAULT,widgetKeys,widgetSlots,widgetSlotsBy,setWidget};
 if(typeof module!=='undefined'&&module.exports)module.exports=Model;else root.Model=Model;
 })(typeof globalThis!=='undefined'?globalThis:this);

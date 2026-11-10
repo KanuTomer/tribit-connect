@@ -108,4 +108,11 @@ Copy-Item -LiteralPath (Join-Path $taskRoot 'build\bin\Release\TribitConnect-Set
 & (Join-Path $taskSdk 'signtool.exe') sign /fd SHA256 /sha1 $taskCert.Thumbprint /s My $taskInstaller
 if($LASTEXITCODE -ne 0){throw 'Setup signing failed.'}
 Write-Output "Installer: $taskInstaller"
+# For a GitHub release: the app's updater looks for TribitConnect-Setup-<MAJOR.MINOR.PATCH>.exe and its
+# .sha256 (src/updates.hpp). Publishing the release is a separate step, done only on the owner's yes.
+$taskDisplay=($taskVersion -split '\.')[0..2] -join '.'
+$taskRelease=Join-Path $taskOut "TribitConnect-Setup-$taskDisplay.exe"
+Copy-Item -LiteralPath $taskInstaller -Destination $taskRelease -Force
+((Get-FileHash -LiteralPath $taskRelease -Algorithm SHA256).Hash+'  '+[IO.Path]::GetFileName($taskRelease)) | Set-Content -LiteralPath ($taskRelease+'.sha256') -Encoding ascii
+Write-Output "Release files: $taskRelease (+ .sha256)"
 Write-Output 'The private signing key stays in the Windows certificate store; no PFX is exported.'

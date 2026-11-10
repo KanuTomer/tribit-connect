@@ -30,7 +30,7 @@ int main(){try{
 
     // The template never depends on the speaker's state, so state changes are data-only updates
     // and the host keeps the card and its images instead of rebuilding it (which flashed).
-    const WidgetPage pages[]={WidgetPage::Home,WidgetPage::More,WidgetPage::Prompts,WidgetPage::Diagnostics};
+    const WidgetPage pages[]={WidgetPage::Home,WidgetPage::More,WidgetPage::Prompts,WidgetPage::Diagnostics,WidgetPage::Speakers};
     WidgetView chosen;chosen.proposed=Command{Operation::Preset,tribit::Rock};
     for(auto* icons:{&art,static_cast<WidgetIcons*>(nullptr)})
         for(auto size:{WidgetSize::Medium,WidgetSize::Large})
@@ -123,6 +123,19 @@ int main(){try{
     expect(view.failed_write&&!view.proposed,"An unconfirmed write is reported once it resolves");
     reconcile_widget(view,connected());
     expect(!view.failed_write,"A fresh healthy read clears the failure");
+
+    // Several speakers: the Speakers page lists them, and a disconnected Home offers Switch.
+    { WidgetSpeakers two{{"XSound Plus 2 (Living)","00:11:22:33:44:55",true,true},{"XSound Plus 2 (Study)","00:11:22:33:44:66",false,false}};
+      auto speakers_data=[&](const Snapshot& s,WidgetPage page){return parse(make_card(s,WidgetSize::Medium,view_of(page),art,false,default_slots(),two).data);};
+      auto d=speakers_data(connected(),WidgetPage::Speakers);
+      expect(d.GetNamedObject(L"sp0").GetNamedBoolean(L"shown")&&str(d.GetNamedObject(L"sp0"),L"detail")=="In use"&&!d.GetNamedObject(L"sp0").GetNamedBoolean(L"enabled"),"The speaker in use is listed first and cannot be switched to");
+      expect(str(d.GetNamedObject(L"sp1"),L"detail")=="Off"&&d.GetNamedObject(L"sp1").GetNamedBoolean(L"enabled")&&!d.GetNamedObject(L"sp2").GetNamedBoolean(L"shown"),"Others can be chosen; unused rows hide");
+      expect(make_card(connected(),WidgetSize::Medium,view_of(WidgetPage::Speakers),art,false,default_slots(),two).tmpl==make_card(off,WidgetSize::Medium,view_of(WidgetPage::Speakers),art).tmpl,"The Speakers page template does not depend on what is paired");
+      expect(speakers_data(off,WidgetPage::Home).GetNamedBoolean(L"showSwitch")&&!speakers_data(connected(),WidgetPage::Home).GetNamedBoolean(L"showSwitch")&&!data(off).GetNamedBoolean(L"showSwitch"),"Switch shows only when disconnected with another speaker paired");
+      expect(str(speakers_data(off,WidgetPage::Diagnostics),L"model")=="XSound Plus 2 (Living)","Device details name the speaker in use"); }
+    // Try again only where it can help: Windows has the speaker but its controls are busy.
+    { Snapshot gone=off;gone.reason="off";Snapshot held=off;held.reason="busy";held.error="refused";
+      expect(!can_try_again(gone)&&can_try_again(held)&&status_label(gone)=="Speaker off"&&status_label(held)=="Controls busy","Try again is offered for busy controls, not for a speaker that is off"); }
     std::cout<<"Passed: state-independent templates, data for every state, command mapping, navigation.\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}
 catch(const winrt::hresult_error& error){std::cerr<<winrt::to_string(error.message())<<"\n";return 1;}}

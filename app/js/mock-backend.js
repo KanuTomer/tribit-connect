@@ -7,12 +7,40 @@ const CUSTOM=0xFE,STORE='tribit-connect.mock.library';
 const sim={
   speaker:{connected:true,status:'connected',error:'',name:'XSound Plus 2',firmware:'0.3.1',battery:90,
     preset:1,bands:[0,0,0,0,0,0,0,0,0],buttons:[{preset:0},{preset:1},{preset:3}],
-    prompts:[1,1,1,1,1],autoShutdown:1,lastSeen:Date.now()},
-  settings:{release:false,logging:false},
+    prompts:[1,1,1,1,1],autoShutdown:1,lastSeen:Date.now(),settled:false,reason:''},
+  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',version:'0.7.3',update:{state:'idle',version:''}},
   latency:260,failNext:false,
 };
+// Paired Tribit speakers for the Speakers page. ?speakers=two adds a second XSound Plus 2,
+// ?speakers=none has nothing paired.
+const PAIRED={
+  one:[{name:'Tribit XSound Plus 2',model:'XSound Plus 2',address:'00:11:22:33:44:01',connected:true,supported:true},
+       {name:'Tribit StormBox Flow',model:'StormBox Flow',address:'00:11:22:33:44:03',connected:false,supported:false}],
+};
+PAIRED.two=[PAIRED.one[0],{name:'XSound Plus 2 (Study)',model:'XSound Plus 2',address:'00:11:22:33:44:02',connected:true,supported:true},PAIRED.one[1]];
+PAIRED.none=[];
+// ?speakers=six: a crowded case, with long Windows names
+PAIRED.six=[...PAIRED.two,
+  {name:'Tribit StormBox Micro 2 — Kitchen Counter',model:'StormBox Micro 2',address:'00:11:22:33:44:04',connected:false,supported:false},
+  {name:'Tribit XSound Mega',model:'XSound Mega',address:'00:11:22:33:44:05',connected:true,supported:false},
+  {name:"Kanu's XSound Plus 2 Bedroom",model:'XSound Plus 2',address:'00:11:22:33:44:06',connected:false,supported:true}];
+sim.settings.startup=(location.search.match(/[?&]startup=([\w-]+)/)||[])[1]||sim.settings.startup;
+sim.paired=structuredClone(PAIRED[(location.search.match(/[?&]speakers=(\w+)/)||[])[1]]||PAIRED.one);
+sim.address=sim.paired.find(d=>d.supported)?.address||'';
 // ?offline starts disconnected (screenshots of the offline state).
-if(/[?&]offline/.test(location.search)){sim.speaker.connected=false;sim.speaker.status='disconnected';}
+// Like the host, the first attempt takes a moment and then settles (the page shows nothing about
+// the speaker until it does).
+const startOff=/[?&]offline/.test(location.search)||!sim.address;
+sim.speaker.connected=false;sim.speaker.status='connecting';
+setTimeout(()=>{const s=sim.speaker;s.settled=true;
+  if(startOff){s.status='disconnected';s.reason='off';if(chosen())chosen().connected=false;}else{s.connected=true;s.status='connected';s.reason='';}
+  publish();speakers();renderDebug();},700);
+// The chosen speaker's entry follows the link.
+const chosen=()=>sim.paired.find(d=>d.address===sim.address);
+// seen: when this app last read each speaker (the host keeps it per address).
+sim.paired.forEach((d,i)=>{d.seen=Date.now()-(i+1)*3600e3;});
+if(chosen())sim.speaker.lastSeen=chosen().seen;
+function speakers(){emit({type:'speakers',list:structuredClone(sim.paired),address:sim.address,chosen:sim.settings.chosen});}
 let emit=()=>{};
 // A stand-in for music this PC plays through the speaker (?music, or the strip's button).
 let music=0;
@@ -45,18 +73,32 @@ function receive(m){
     case 'setAutoShutdown':write(m.id,s=>{s.autoShutdown=m.value?1:0;});break;
     case 'setRelease':sim.settings.release=!!m.value;publish();break;
     case 'setLogging':sim.settings.logging=!!m.value;publish();break;
-    case 'removeData':try{localStorage.removeItem(STORE);}catch{}break;
+    case 'removeData':try{localStorage.removeItem(STORE);}catch{}sim.settings.chosen=false;break;
     case 'saveLibrary':try{localStorage.setItem(STORE,JSON.stringify(m.library));}catch{}break;
-    case 'retry':connect(true);break;
+    case 'retry':if(chosen()?.connected||s.reason==='busy')connect(true);break;
+    case 'markChosen':sim.settings.chosen=true;publish();speakers();break;
+    case 'setCheckUpdates':sim.settings.checkUpdates=!!m.value;publish();break;
+    case 'setTray':sim.settings.tray=!!m.value;publish();break;
+    // ?startup=user-off (or policy-on, policy-off, unavailable) shows what Windows can answer instead.
+    case 'setStartup':setTimeout(()=>{if(sim.settings.startup==='on'||sim.settings.startup==='off')sim.settings.startup=m.value?'on':'off';publish();},300);break;
+    // ?uptodate answers Check now with Up to date; otherwise 0.7.1 is offered.
+    case 'checkUpdate':updateState('checking');setTimeout(()=>{if(/[?&]uptodate/.test(location.search)){updateState('current');setTimeout(()=>{if(sim.settings.update.state==='current')updateState('idle');},4000);}else updateState('available','0.7.3');},800);break;
+    case 'installUpdate':updateState('downloading','0.7.1');setTimeout(()=>{updateState('installing','0.7.1');console.info('[mock] would run setup /update');},1200);break;
+    case 'listSpeakers':speakers();break;
+    case 'chooseSpeaker':{const d=sim.paired.find(x=>x.address===m.address&&x.supported);if(!d)break;
+      sim.address=d.address;sim.settings.chosen=true;s.connected=false;s.status='disconnected';s.reason='off';s.lastSeen=d.seen;publish();if(d.connected)connect(true);break;}
     case 'openBluetooth':console.info('[mock] would open Windows Bluetooth settings');break;
+    case 'openSubmit':console.info('[mock] would open https://tribit-connect-submit.vercel.app/'+(m.model?'?model='+encodeURIComponent(m.model):''));break;
     case 'window':console.info('[mock] window',m.action);break;
   }
 }
+function updateState(state,version=''){sim.settings.update={state,version};publish();}
 async function connect(on){
   const s=sim.speaker;
-  if(on){s.status='connecting';publish();await delay(900);s.connected=true;s.status='connected';s.error='';s.lastSeen=Date.now();}
-  else{s.connected=false;s.status='disconnected';}
-  publish();renderDebug();
+  const d=chosen();
+  if(on){if(!d)return;s.status='connecting';publish();await delay(900);d.connected=true;s.connected=true;s.status='connected';s.error='';s.reason='';s.lastSeen=d.seen=Date.now();}
+  else{s.connected=false;s.status='disconnected';s.reason='off';if(d)d.connected=false;}
+  publish();speakers();renderDebug();
 }
 // ---- Debug strip -------------------------------------------------------------------------
 let strip;
@@ -64,7 +106,9 @@ function renderDebug(){
   if(!strip)return;const s=sim.speaker;
   strip.innerHTML=`<b>mock speaker</b>
     <button data-a="link">${s.connected?'disconnect':'connect'}</button>
+    <button data-a="glitch">1 s drop</button>
     <button data-a="error">${s.status==='unavailable'?'clear error':'bluetooth error'}</button>
+    <button data-a="busy">controls busy</button>
     <button data-a="fail" ${sim.failNext?'class=on':''}>fail next write</button>
     <label>battery <input data-a="battery" type="range" min="0" max="100" value="${s.battery}"> ${s.battery}%</label>
     <label>latency <input data-a="latency" type="range" min="0" max="2000" step="50" value="${sim.latency}"> ${sim.latency} ms</label>
@@ -77,7 +121,10 @@ function setupDebug(){
   addEventListener('keydown',e=>{if(e.key==='`'){strip.hidden=!strip.hidden;}});
   strip.addEventListener('click',e=>{const a=e.target.dataset.a,s=sim.speaker;
     if(a==='link')connect(!s.connected);
-    if(a==='error'){if(s.status==='unavailable'){connect(true);}else{s.connected=false;s.status='unavailable';s.error='Bluetooth is turned off.';publish();renderDebug();}}
+    if(a==='glitch'&&s.connected){connect(false);setTimeout(()=>connect(true),1000);}
+    if(a==='error'){if(s.status==='unavailable'){connect(true);}else{s.connected=false;s.status='unavailable';s.reason='bluetooth';s.error='Bluetooth is turned off.';publish();renderDebug();}}
+    // Windows has the speaker, but another controller (the phone app) holds its controls.
+    if(a==='busy'){s.connected=false;s.status='unavailable';s.reason='busy';s.error='The speaker did not accept the control connection.';publish();renderDebug();}
     if(a==='fail'){sim.failNext=!sim.failNext;renderDebug();}
     if(a==='press'&&s.connected){const lights=s.buttons;const i=(lights.findIndex(b=>b.preset===s.preset&&(b.preset!==CUSTOM||JSON.stringify(b.bands)===JSON.stringify(s.bands)))+1)%3;
       s.preset=lights[i].preset;s.bands=lights[i].bands?lights[i].bands.slice():[0,0,0,0,0,0,0,0,0];publish();}

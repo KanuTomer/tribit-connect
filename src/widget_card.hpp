@@ -17,8 +17,15 @@ static std::string seen_time(int64_t seconds){
 static std::string status_label(const Snapshot& s){
     if(s.pending&&!(s.ready&&s.fresh))return s.status=="Connecting..."?"Connecting…":"Updating…";
     if(s.ready&&s.fresh)return "Connected";
+    // Why there is no link, when the controller knows: off (Windows has not connected it) is not
+    // something Try again can fix; busy (another controller holds it) is.
+    if(s.reason=="off")return "Speaker off";
+    if(s.reason=="busy")return "Controls busy";
+    if(s.reason=="bluetooth")return "Bluetooth unavailable";
     return s.error.empty()?"Disconnected":"Controls unavailable";
 }
+// Try again only helps when Windows has the speaker but the controls could not be opened.
+static bool can_try_again(const Snapshot& s){return !s.ready&&!s.pending&&(s.reason=="busy"||(s.reason.empty()&&!s.error.empty()));}
 namespace card {
 using Items=std::vector<std::string>;
 static std::string list(const Items& items){std::string result="[";for(auto& item:items){if(item.empty())continue;if(result.size()>1)result+=",";result+=item;}return result+"]";}
@@ -100,7 +107,10 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
         return tile({columns({col({glyph(icons,symbol,20)},"20px"),pad(12),col(copy),col({glyph(icons,"next",16)},"16px")})},height,action(verb,label));
     };
     auto note_text=[&](const char* field,const char* align){return text_json(bound(field),"Small","true",::quoted("Default"),align,1,::quoted("Default"));};
-    auto retry_button=[&](){return shown_if(col({text("Retry","Small",false,true,"Right",1)},"auto",16,action("retry","Reconnect to the speaker")),"showRetry");};
+    // Try again opens the speaker's controls again; it shows only when that can help (can_try_again).
+    auto retry_button=[&](){return shown_if(col({text("Try again","Small",false,true,"Right",1)},"auto",16,action("retry","Open the speaker's controls again")),"showRetry");};
+    // With another speaker to use, a disconnected widget offers to switch.
+    auto switch_button=[&](){return shown_if(col({text("Switch","Small",false,true,"Right",1)},"auto",16,action("view.speakers","Switch to another speaker")),"showSwitch");};
     if(page==WidgetPage::Home){
         // One compact line: battery bar and level, then the connection state when it needs saying.
         // The bar is native containers rather than an image: the host rebuilds the card on every
@@ -108,7 +118,7 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
         auto bar=box({columns({col({},"${batteryFill}",10,"","${batteryStyle}"),col({},"stretch",10,"","emphasis")},10)},20);
         Items line{col({bar},"28px",20),pad(6),
             col({text_json(bound("batteryText"),"Default",bound("batterySubtle"),::quoted("Bolder"),"Left",1,bound("batteryColor"))},"auto",20),
-            pad(8),col({note_text("status","Left")},"stretch",20),retry_button()};
+            pad(8),col({note_text("status","Left")},"stretch",20),retry_button(),pad(8),switch_button()};
         // On medium the row sits 4px lower, clear of the board's title bar, which took clicks on the gear's top edge.
         if(!expanded){line.push_back(pad(8));line.push_back(icon_button(icons,"settings","view.more","Speaker settings",true,20));}
         add(columns(line,24),expanded?0:4);
@@ -131,22 +141,24 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
             rows.push_back(gap(row?4:0));rows.push_back(columns(chips,height));
         }
         add(box(rows),8);
-        if(expanded)add(nav_tile("settings","Speaker settings","Voice prompts and auto shutdown","view.more","Open speaker settings",56),16);
+        if(expanded)add(nav_tile("settings","Speaker settings","Voice prompts, auto shutdown, switching","view.more","Open speaker settings",56),16);
     }else if(page==WidgetPage::More||page==WidgetPage::Prompts){
-        struct Row{const char* symbol;std::string label,hint,verb;bool toggle;};
+        struct Row{const char* symbol;std::string label,hint,verb;bool toggle;std::string field;};
         std::vector<Row> rows;
         const bool prompts=page==WidgetPage::Prompts;
-        if(prompts)for(int i=0;i<5;++i)rows.push_back({"bell",kPromptLabels[i],"","prompt."+std::to_string(i),true});
-        else rows={{"bell","Voice prompts","Speaker beeps","view.prompts",false},{"power","Auto shutdown","Turns off when idle","pref.autoshutdown",true},
-            {"link","Release for phone app","Frees it when the widget hides","pref.release",true},{"log","Diagnostic logging","Off unless you need it","pref.logging",true},
-            {"diagnostics","Device details","Connection, firmware, Bluetooth","view.diagnostics",false}};
+        if(prompts)for(int i=0;i<5;++i)rows.push_back({"bell",kPromptLabels[i],"","prompt."+std::to_string(i),true,"q"+std::to_string(i)});
+        // Everything here belongs to the speaker in use, as in Sound Lab; the app's own settings
+        // (the diagnostic log among them) live in Sound Lab's Speakers page.
+        else rows={{"bell","Voice prompts","Speaker beeps","view.prompts",false,""},{"power","Auto shutdown","Turns off when idle","pref.autoshutdown",true,"m1"},
+            {"link","Release for phone app","Frees it when the widget hides","pref.release",true,"m2"},
+            {"bluetooth","Speakers","Switch, connection, firmware","view.speakers",false,""}};
         const int per_page=5,pages=(static_cast<int>(rows.size())+per_page-1)/per_page,current=std::clamp(view.details_page,0,pages-1);
         // State notes share the title row, so a disconnected page is no taller than a connected one.
         Items trailing{col({note_text("note","Right")},"auto",24)};
         if(pages>1)for(auto& item:page_controls(current,pages))trailing.push_back(item);
         title(prompts?"Voice prompts":"Speaker settings",prompts?"view.more":"view.home",trailing);
         for(int i=current*per_page;i<std::min(static_cast<int>(rows.size()),(current+1)*per_page);++i){auto& r=rows[i];
-            auto field=std::string(prompts?"q":"m")+std::to_string(i);
+            auto& field=r.field;
             Items copy{text(r.label,"Small",false,true,"Left",1)};if(!r.hint.empty())copy.push_back(text(r.hint,"Small",true,false,"Left",1));
             Items row{col({glyph(icons,r.symbol,18)},"18px"),pad(12),col(copy,"stretch"),pad(8)};
             // One flat full-row target includes its state or chevron.
@@ -154,6 +166,19 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
             auto click=r.toggle?action_json(r.verb,bound(field+".title"),bound(field+".enabled")):action(r.verb,r.label);
             add(tile({columns(row,0)},expanded?52:40,click,12,4),i==current*per_page?8:4);
         }
+    }else if(page==WidgetPage::Speakers){
+        // The paired speakers this app can control; tapping one switches to it. Rows hide when unused,
+        // so the template stays the same whatever is paired.
+        title("Speakers","view.more");
+        for(int i=0;i<kWidgetSpeakerRows;++i){auto p="sp"+std::to_string(i);
+            Items copy{text_json(bound(p+".label"),"Small","false",bound(p+".weight"),"Left",1,bound(p+".color")),
+                text_json(bound(p+".detail"),"Small","true",::quoted("Default"),"Left",1,::quoted("Default"))};
+            body.push_back(shown_if(box({gap(i?4:8),tile({columns({col({glyph(icons,"bluetooth",18)},"18px"),pad(12),col(copy)})},expanded?52:44,
+                action_json("speaker.choose."+std::to_string(i),bound(p+".title"),bound(p+".enabled")),12,4)}),p+".shown"));
+        }
+        add(nav_tile("diagnostics","Device details","Connection, firmware, battery","view.diagnostics","Open device details",expanded?52:44),8);
+        add(tile({columns({col({glyph(icons,"bluetooth",18)},"18px"),pad(12),col({text("Pair a speaker","Small",false,true,"Left",1),text("Windows Bluetooth settings","Small",true,false,"Left",1)}),
+            col({glyph(icons,"next",16)},"20px")})},expanded?52:44,action("open.bluetooth","Open Windows Bluetooth settings"),12,4),4);
     }else{
         // The diagnostic row is always in the template and only shows when there is an error.
         struct Row{const char* label;const char* field;};
@@ -161,7 +186,7 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
         const int total=static_cast<int>(std::size(rows))+1,count=expanded?7:5,pages=(total+count-1)/count,current=std::clamp(view.details_page,0,pages-1);
         Items trailing{retry_button()};
         if(pages>1)for(auto& item:page_controls(current,pages))trailing.push_back(item);
-        title("Device","view.more",trailing);
+        title("Device","view.speakers",trailing);
         // The Bluetooth settings link is the last row of the last page.
         for(int i=current*count;i<std::min(total,(current+1)*count);++i){
             int before=i==current*count?8:4;
@@ -179,7 +204,7 @@ static std::string card_template(WidgetSize size,const WidgetView& view={},const
 }
 
 // Everything the template binds, for the current state. One object serves every page.
-static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false,const WidgetSlots& slots=default_slots()){
+static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false,const WidgetSlots& slots=default_slots(),const WidgetSpeakers& speakers={}){
     // A background refresh on a working link changes nothing on the card: every update rebuilds it.
     const bool enabled=s.ready&&s.fresh,healthy=s.fresh&&s.ready;
     const auto page=view.page;
@@ -199,7 +224,8 @@ static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView&
     // confirmation produces identical data and sends no second update (each update rebuilds the card).
     const bool live=enabled||choosing;
     flag("enabled",live);
-    flag("showRetry",!s.ready&&!s.pending&&!s.error.empty());
+    flag("showRetry",can_try_again(s));
+    flag("showSwitch",!(s.ready&&s.fresh)&&!s.pending&&speakers.size()>=2);
     // Only the fields the current page binds, so values it doesn't show (the last-seen
     // minute, the curve on the settings pages) never trigger an update.
     if(page==WidgetPage::Home){
@@ -241,10 +267,20 @@ static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView&
     for(int i=0;i<5;++i)toggle("q"+std::to_string(i),kPromptLabels[i],shown_toggle(view,Operation::Prompt,i,s.prompts[i]),true,live&&s.prompts[i]>=0);
     toggle("m1","Auto shutdown",shown_toggle(view,Operation::AutoShutdown,0,s.auto_shutdown),true,live&&s.auto_shutdown>=0);
     toggle("m2","Release for phone app",s.release_when_hidden?1:0,false,true);
-    toggle("m3","Diagnostic logging",logging?1:0,false,true);
     str("note",view.failed_write?"Not confirmed":stale?"Not connected":"");
+    }else if(page==WidgetPage::Speakers){
+    for(int i=0;i<kWidgetSpeakerRows;++i){
+        const bool shown=i<static_cast<int>(speakers.size());const WidgetSpeaker sp=shown?speakers[i]:WidgetSpeaker{};
+        const bool linked=sp.in_use&&s.ready&&s.fresh;
+        // In use is the one this app controls; the others are on (Windows has them) or off.
+        std::string detail=sp.in_use?(linked?"In use":"In use · "+status_label(s)):sp.connected?"On":"Off";
+        obj("sp"+std::to_string(i),{{"shown",shown?"true":"false"},{"label",::quoted(sp.name)},{"detail",::quoted(detail)},
+            {"color",::quoted(sp.in_use?"Accent":"Default")},{"weight",::quoted(sp.in_use?"Bolder":"Default")},
+            {"title",::quoted(sp.name+", "+detail)},{"enabled",shown&&!linked?"true":"false"}});
+    }
     }else{
-    str("model","Tribit XSound Plus 2");
+    std::string model="Tribit XSound Plus 2";for(auto& sp:speakers)if(sp.in_use)model=sp.name;
+    str("model",model);
     str("firmware",s.firmware.empty()?"Not reported":s.firmware);
     str("batteryDetail",battery_text(s)+(stale&&s.battery>=0?", last known":""));
     str("lastSeen",last_seen.empty()?"Not yet":last_seen);
@@ -254,6 +290,6 @@ static std::string card_data(const Snapshot& s,WidgetSize size,const WidgetView&
     }
     std::string out="{";for(auto& [k,v]:fields){if(out.size()>1)out+=",";out+=::quoted(k)+":"+v;}return out+"}";
 }
-static WidgetCard make_card(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false,const WidgetSlots& slots=default_slots()){
-    return {card_template(size,view,icons),card_data(s,size,view,icons,logging,slots)};
+static WidgetCard make_card(const Snapshot& s,WidgetSize size,const WidgetView& view={},const WidgetIcons& icons={},bool logging=false,const WidgetSlots& slots=default_slots(),const WidgetSpeakers& speakers={}){
+    return {card_template(size,view,icons),card_data(s,size,view,icons,logging,slots,speakers)};
 }
