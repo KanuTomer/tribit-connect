@@ -4,8 +4,11 @@
 #include <windows.h>
 #include <bluetoothapis.h>
 #include "protocol.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
+#include <cwctype>
+#include <vector>
 #include <deque>
 #include <functional>
 #include <string>
@@ -67,6 +70,39 @@ inline PairedSpeaker find_speaker(std::optional<BTH_ADDR> wanted){
     BluetoothFindDeviceClose(find);
     if(!match)throw std::runtime_error(wanted?"That address is not a paired device.":"No paired Tribit XSound Plus 2 was found. Pair it in Windows Bluetooth settings, or pass --address.");
     return *match;
+}
+
+// Tribit speakers people are likely to own, longest names first so "XSound Plus 2" wins over
+// "XSound Plus". Same list as the add-your-speaker site (tribit-connect-submit lib/models.ts).
+inline constexpr const wchar_t* kTribitModels[]={L"StormBox Micro 2",L"XSound Plus 2",L"StormBox Micro",L"StormBox Blast",
+    L"MaxSound Plus",L"StormBox Flow",L"StormBox Pro",L"XSound Plus",L"XSound Surf",L"XSound Mega",L"StormBox 2",L"XSound Go"};
+inline constexpr const wchar_t* kSupportedModel=L"XSound Plus 2";
+struct TribitDevice{std::wstring name,model;BTH_ADDR address{};bool connected{},supported{};};
+// Every paired Tribit speaker Windows knows, for the Speakers page. Never scans or pairs.
+// A name with "Tribit" but no known model is listed under its own name, as not supported.
+inline std::vector<TribitDevice> list_speakers(){
+    std::vector<TribitDevice> out;
+    BLUETOOTH_DEVICE_SEARCH_PARAMS search{sizeof search};
+    search.fReturnAuthenticated=TRUE;search.fReturnRemembered=TRUE;search.fReturnConnected=TRUE;search.fIssueInquiry=FALSE;
+    BLUETOOTH_DEVICE_INFO info{sizeof info};
+    HBLUETOOTH_DEVICE_FIND find=BluetoothFindFirstDevice(&search,&info);
+    if(!find)return out;
+    auto lower=[](std::wstring s){for(auto& c:s)c=static_cast<wchar_t>(towlower(c));return s;};
+    do{
+        std::wstring name=info.szName,low=lower(name),model;
+        for(auto m:kTribitModels)if(low.find(lower(m))!=std::wstring::npos){model=m;break;}
+        if(model.empty()&&low.find(L"tribit")!=std::wstring::npos){
+            model=name;auto at=low.find(L"tribit");model.erase(at,6);
+            while(!model.empty()&&iswspace(model.front()))model.erase(0,1);
+            while(!model.empty()&&iswspace(model.back()))model.pop_back();
+            if(model.empty())model=name;
+        }
+        if(!model.empty()&&std::none_of(out.begin(),out.end(),[&](auto& d){return d.address==info.Address.ullLong;}))
+            out.push_back({name,model,info.Address.ullLong,info.fConnected!=FALSE,model==kSupportedModel});
+        info.dwSize=sizeof info;
+    }while(BluetoothFindNextDevice(find,&info));
+    BluetoothFindDeviceClose(find);
+    return out;
 }
 
 // Event-driven RFCOMM link: an idle connection sleeps on wait_handle() until the speaker sends data.

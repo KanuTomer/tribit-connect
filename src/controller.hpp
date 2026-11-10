@@ -19,6 +19,11 @@ struct Snapshot {
     std::array<std::array<int,tribit::kEqBands>,3> button_bands{}; // dB, for lights holding a custom curve
     int64_t checked{};
     bool release_when_hidden{};
+    bool settled{};      // the first connect attempt after start has finished, either way
+    // Why there is no link, for the page's words and keys: "off" (Windows has not connected the
+    // speaker), "busy" (it has, but the controls could not be opened), "bluetooth" (radio
+    // unavailable), "released" (the app let go on purpose), or empty.
+    std::string reason;
 };
 
 // The six presets the speaker accepts, in the order the Tribit app lists them.
@@ -28,7 +33,7 @@ inline constexpr std::array<const char*,3> kLightLabels{"Light off","White light
 inline std::string preset_label(int preset){return preset<0?"Not checked":tribit::preset_name(static_cast<uint8_t>(preset));}
 inline bool valid_preset(int preset){return std::find(kPresetOrder.begin(),kPresetOrder.end(),preset)!=kPresetOrder.end();}
 
-enum class Operation { Activate, Deactivate, Retry, Preset, CustomEq, Prompt, AutoShutdown, Buttons, Policy, Suspend, Reconnect, Disconnect };
+enum class Operation { Activate, Deactivate, Retry, Preset, CustomEq, Prompt, AutoShutdown, Buttons, Policy, Suspend, Reconnect, Disconnect, Choose };
 using Bands=std::array<int,tribit::kEqBands>;
 // `id` (non-zero) asks for a result callback once the speaker confirms or the command fails.
 struct Command { Operation operation; int value{}; int index{}; std::array<int,3> buttons{}; int id{}; Bands bands{}; std::array<Bands,3> button_bands{}; };
@@ -48,6 +53,16 @@ public:
     void lifecycle(Operation operation){std::lock_guard lock(mutex_);if(std::none_of(commands_.begin(),commands_.end(),[&](auto& c){return c.operation==operation;}))commands_.push_back({operation});SetEvent(wake_);}
     void release_when_hidden(bool release){
         {std::lock_guard lock(mutex_);state_.release_when_hidden=release;commands_.push_back({Operation::Policy});SetEvent(wake_);}
+        notify_();
+    }
+    // The Speakers page picked a speaker: drop the current link and connect to that one.
+    // `known` is what that speaker last reported (state.json), shown as last known until it links.
+    void choose(const std::string& address,const Snapshot& known){
+        {std::lock_guard lock(mutex_);state_.address=address;std::erase_if(commands_,[](auto& c){return c.operation==Operation::Choose;});
+            state_.ready=state_.fresh=false;state_.status="Not connected";state_.error.clear();state_.reason="off";
+            state_.firmware=known.firmware;state_.battery=known.battery;state_.preset=known.preset;state_.bands=known.bands;state_.checked=known.checked;
+            state_.prompts=known.prompts;state_.auto_shutdown=known.auto_shutdown;state_.buttons=known.buttons;state_.button_bands=known.button_bands;
+            commands_.push_back({Operation::Choose});SetEvent(wake_);}
         notify_();
     }
     // Called on the worker thread with a command's id once it is confirmed or has failed.
@@ -123,7 +138,7 @@ private:
     }
     // Publishes a confirmed snapshot together with the queue state, so the widget gets one update, not three.
     void commit(Snapshot next){
-        next.ready=true;next.fresh=true;next.error.clear();next.status="Connected";
+        next.ready=true;next.fresh=true;next.error.clear();next.status="Connected";next.reason.clear();
         next.checked=std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
         publish([&](Snapshot& state){next.pending=!commands_.empty();next.release_when_hidden=state.release_when_hidden;state=std::move(next);});
     }
@@ -198,20 +213,25 @@ private:
                 if(!commands_.empty()){command=std::move(commands_.front());commands_.pop_front();}
                 if(commands_.empty())ResetEvent(wake_);
             }
-            bool scheduled=false,connecting=false;
+            bool scheduled=false,connecting=false,found=false;
             if(!command&&!speaker&&Clock::now()>=retry_at){scheduled=true;retry_at=Clock::time_point::max();command=Command{active?Operation::Retry:Operation::Reconnect};}
             // A fresh trigger (activation, Bluetooth link, resume) restarts the backoff.
-            if(command&&!scheduled&&(command->operation==Operation::Activate||command->operation==Operation::Retry||command->operation==Operation::Reconnect)){retries=0;retry_at=Clock::time_point::max();link_grace=command->operation==Operation::Reconnect?2:0;}
+            if(command&&!scheduled&&(command->operation==Operation::Activate||command->operation==Operation::Retry||command->operation==Operation::Reconnect||command->operation==Operation::Choose)){retries=0;retry_at=Clock::time_point::max();link_grace=command->operation==Operation::Reconnect?2:0;}
             try {
                 if(command && command->operation==Operation::Deactivate) {
                     active=false;refresh_at=Clock::time_point::max();
                     release_at=snapshot().release_when_hidden?Clock::now()+15s:Clock::time_point::max();
-                    if(!speaker) publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";});
+                    if(!speaker) publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";s.reason="released";});
                 } else if(command&&command->operation==Operation::Policy){release_at=!active&&snapshot().release_when_hidden?Clock::now()+15s:Clock::time_point::max();
                 } else if(command&&(command->operation==Operation::Suspend||command->operation==Operation::Disconnect)){
                     suspended=command->operation==Operation::Suspend;speaker.reset();release_at=refresh_at=retry_at=Clock::time_point::max();retries=0;
-                    publish([&](auto& s){s.ready=s.pending=s.fresh=false;s.status=suspended?"Sleeping":"Not connected";s.error.clear();});
-                } else if(command && (command->operation==Operation::Activate || command->operation==Operation::Retry||command->operation==Operation::Reconnect)) {
+                    publish([&](auto& s){s.ready=s.pending=s.fresh=false;s.status=suspended?"Sleeping":"Not connected";s.reason=suspended?"released":"off";s.error.clear();});
+                } else if(command && (command->operation==Operation::Activate || command->operation==Operation::Retry||command->operation==Operation::Reconnect||command->operation==Operation::Choose)) {
+                    if(command->operation==Operation::Choose){
+                        // Another speaker: forget what the last one reported, then connect as Retry does.
+                        speaker.reset();suspended=false;refresh_at=Clock::time_point::max();
+                        drop_settings("Another speaker was chosen.");   // its last-known values were loaded by choose()
+                    }
                     if(command->operation==Operation::Reconnect){suspended=false;if(snapshot().address.empty()||(!active&&snapshot().release_when_hidden))continue;}
                     else {active=true;release_at=Clock::time_point::max();}
                     if(suspended)continue;
@@ -220,6 +240,7 @@ private:
                         auto previous=tribit::parse_address(snapshot().address);
                         auto device=tribit::find_speaker(previous);
                         if(!device.connected)throw tribit::NotConnected("Speaker not connected.");
+                        found=true;
                         publish([](auto& s){s.ready=false;s.fresh=false;s.pending=true;s.status="Connecting...";s.error.clear();});
                         speaker=std::make_unique<tribit::Speaker>();speaker->connect(device.address);
                         publish([&](auto& s){s.address=tribit::format_address(device.address);});
@@ -235,7 +256,7 @@ private:
                 }
                 if(speaker && !active && Clock::now()>=release_at) {
                     speaker.reset();
-                    publish([](auto& s){s.ready=false;s.fresh=false;s.status="Controls idle";});
+                    publish([](auto& s){s.ready=false;s.fresh=false;s.status="Controls idle";s.reason="released";});
                 }
                 if(speaker){
                     // The frame format of the speaker's own notifications is not decoded yet;
@@ -258,20 +279,25 @@ private:
                 drop_settings("The speaker is not connected.");
                 if(link_grace>0&&retries<std::size(retry_delays)){--link_grace;retry_at=Clock::now()+retry_delays[retries++];}
                 else{retry_at=Clock::time_point::max();retries=0;link_grace=0;}
-                publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";s.error.clear();});
+                publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";s.reason="off";s.error.clear();});
             } catch(const std::exception& error) {
                 speaker.reset();refresh_at=Clock::time_point::max();
                 if(command)report(command->id,false,error.what());
                 drop_settings("The speaker connection was reset.");
-                publish([&](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Controls unavailable";s.error=error.what();});
+                publish([&](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Controls unavailable";s.error=error.what();
+                    // Not found among the paired devices is "off"; found but refused is "busy" (another controller).
+                    s.reason=connecting&&!found?"off":"busy";});
                 if(connecting&&!suspended&&retries<std::size(retry_delays))retry_at=Clock::now()+retry_delays[retries++];
             } catch(const winrt::hresult_error& error) {
                 speaker.reset();refresh_at=Clock::time_point::max();
                 if(command)report(command->id,false,winrt::to_string(error.message()));
                 drop_settings("Bluetooth is unavailable.");
                 if(connecting&&!suspended&&retries<std::size(retry_delays))retry_at=Clock::now()+retry_delays[retries++];
-                publish([&](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Bluetooth unavailable";s.error=winrt::to_string(error.message());});
+                publish([&](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Bluetooth unavailable";s.reason="bluetooth";s.error=winrt::to_string(error.message());});
             }
+            // The page waits for the first attempt to finish before it shows anything about the speaker.
+            if(command&&!snapshot().settled&&(command->operation==Operation::Activate||command->operation==Operation::Retry||command->operation==Operation::Reconnect||command->operation==Operation::Choose))
+                publish([](auto& s){s.settled=true;});
             // No scheduled work while idle. Only socket data, commands, lifecycle events,
             // the visible-widget refresh or the optional release deadline wake us.
             HANDLE waits[]={wake_,speaker?speaker->wait_handle():nullptr};

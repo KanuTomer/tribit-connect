@@ -5,7 +5,11 @@ using winrt::Microsoft::Windows::Widgets::WidgetSize;
 #include <map>
 #include <optional>
 
-enum class WidgetPage { Home, More, Prompts, Diagnostics };
+enum class WidgetPage { Home, More, Prompts, Diagnostics, Speakers };
+// The paired speakers this app can control, for the widget's Speakers page (switching).
+struct WidgetSpeaker { std::string name, address; bool in_use{}, connected{}; };
+using WidgetSpeakers=std::vector<WidgetSpeaker>;
+inline constexpr int kWidgetSpeakerRows=3;
 // Curve heights on the Medium and Large Home pages; images are drawn at these exact sizes.
 inline constexpr std::array<int,2> kCurveHeights{80,96};
 struct WidgetView {
@@ -31,6 +35,7 @@ static bool navigate_widget(WidgetView& view,std::wstring_view verb) {
     else if(verb==L"view.more"){view.page=WidgetPage::More;view.details_page=0;}
     else if(verb==L"view.prompts"){view.page=WidgetPage::Prompts;view.details_page=0;}
     else if(verb==L"view.diagnostics"){view.page=WidgetPage::Diagnostics;view.details_page=0;}
+    else if(verb==L"view.speakers"){view.page=WidgetPage::Speakers;view.details_page=0;}
     else if(verb==L"view.details.next")++view.details_page;
     else if(verb==L"view.details.previous")view.details_page=std::max(0,view.details_page-1);
     else return false;

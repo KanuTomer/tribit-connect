@@ -8,13 +8,18 @@
 #include "native_editor.hpp"
 #include "webview_host.hpp"
 #include "spectrum.hpp"
+#include "updates.hpp"
 #include <winrt/Windows.Data.Json.h>
 #include <winrt/Windows.Foundation.Collections.h>
+#include <winrt/Windows.ApplicationModel.h>
+#include <winrt/Windows.ApplicationModel.Activation.h>
 #include <winrt/Microsoft.Windows.Widgets.Providers.h>
 #include <winrt/Microsoft.Windows.Widgets.h>
 #include <commctrl.h>
 #include <shlobj.h>
 #include <sddl.h>
+#include <cctype>
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -24,7 +29,8 @@
 namespace wp=winrt::Microsoft::Windows::Widgets::Providers;
 using namespace winrt::Windows::Data::Json;
 constexpr GUID ProviderClsid{0xa3fb741b,0xa71f,0x48b5,{0x90,0x4e,0x46,0x05,0xd8,0xd0,0x27,0x72}};
-constexpr UINT AppDispatchMessage=WM_APP+1, StateMessage=WM_APP+2;
+constexpr UINT AppDispatchMessage=WM_APP+1, StateMessage=WM_APP+2, TrayMessage=WM_APP+3;
+constexpr wchar_t StartupTaskId[]=L"TribitConnectStartup";   // packaging/AppxManifest.xml
 
 // Profiles and settings live in %LOCALAPPDATA%\Tribit Connect, outside the package, so uninstalling
 // or reinstalling never deletes them (the manifest turns off file-write virtualization, so this is
@@ -51,23 +57,46 @@ template<size_t N> static void read_array(const JsonObject& json,const wchar_t* 
     for(uint32_t i=0;i<N;++i)out[i]=static_cast<int>(values.GetNumberAt(i));
 }
 template<size_t N> static JsonArray write_array(const std::array<int,N>& values){JsonArray out;for(auto value:values)out.Append(JsonValue::CreateNumberValue(value));return out;}
-static Snapshot load_cache(const std::filesystem::path& path,bool& logging) {
-    Snapshot s;
+// What a speaker last reported, as kept in state.json (flat for the speaker in use, and per address
+// under "speakers" so switching back shows that speaker's own last-known values).
+static void read_speaker(const JsonObject& json,Snapshot& s){
+    s.firmware=winrt::to_string(json.GetNamedString(L"firmware",L""));
+    s.checked=static_cast<int64_t>(json.GetNamedNumber(L"checked",0));
+    s.battery=static_cast<int>(json.GetNamedNumber(L"battery",-1));
+    s.preset=static_cast<int>(json.GetNamedNumber(L"preset",-1));
+    s.auto_shutdown=static_cast<int>(json.GetNamedNumber(L"auto_shutdown",-1));
+    read_array(json,L"prompts",s.prompts);read_array(json,L"buttons",s.buttons);read_array(json,L"bands",s.bands);
+    // "Let the phone app connect" belongs to the speaker (0.7.1); an entry from before keeps the current value.
+    if(json.HasKey(L"release_when_hidden"))s.release_when_hidden=json.GetNamedBoolean(L"release_when_hidden",false);
+}
+static void write_speaker(JsonObject& j,const Snapshot& s){
+    j.SetNamedValue(L"firmware",JsonValue::CreateStringValue(winrt::to_hstring(s.firmware)));
+    j.SetNamedValue(L"checked",JsonValue::CreateNumberValue(static_cast<double>(s.checked)));
+    j.SetNamedValue(L"battery",JsonValue::CreateNumberValue(s.battery));j.SetNamedValue(L"preset",JsonValue::CreateNumberValue(s.preset));
+    j.SetNamedValue(L"auto_shutdown",JsonValue::CreateNumberValue(s.auto_shutdown));
+    j.SetNamedValue(L"prompts",write_array(s.prompts));j.SetNamedValue(L"buttons",write_array(s.buttons));j.SetNamedValue(L"bands",write_array(s.bands));
+    j.SetNamedValue(L"release_when_hidden",JsonValue::CreateBooleanValue(s.release_when_hidden));
+}
+struct Cache{Snapshot initial;bool logging{},chosen{},check_updates=true,tray{};int64_t last_update_check{};JsonObject speakers{nullptr};};
+static Cache load_cache(const std::filesystem::path& path) {
+    Cache c;Snapshot& s=c.initial;c.speakers=JsonObject();
     try {
-        auto text=read_file(path);if(text.empty())return s;
+        auto text=read_file(path);if(text.empty())return c;
         auto json=JsonObject::Parse(winrt::to_hstring(text));
-        logging=json.GetNamedBoolean(L"logging",false);
+        c.logging=json.GetNamedBoolean(L"logging",false);
+        c.chosen=json.GetNamedBoolean(L"chosen",false);
+        c.check_updates=json.GetNamedBoolean(L"check_updates",true);
+        c.tray=json.GetNamedBoolean(L"tray",false);
+        c.last_update_check=static_cast<int64_t>(json.GetNamedNumber(L"last_update_check",0));
         s.release_when_hidden=json.GetNamedBoolean(L"release_when_hidden",false);
         s.address=winrt::to_string(json.GetNamedString(L"address",L""));
-        s.firmware=winrt::to_string(json.GetNamedString(L"firmware",L""));
-        s.checked=static_cast<int64_t>(json.GetNamedNumber(L"checked",0));
-        s.battery=static_cast<int>(json.GetNamedNumber(L"battery",-1));
-        s.preset=static_cast<int>(json.GetNamedNumber(L"preset",-1));
-        s.auto_shutdown=static_cast<int>(json.GetNamedNumber(L"auto_shutdown",-1));
-        read_array(json,L"prompts",s.prompts);read_array(json,L"buttons",s.buttons);
+        read_speaker(json,s);
         s.status=s.checked?"Controls idle":"Not connected";
+        if(json.HasKey(L"speakers")&&json.GetNamedValue(L"speakers").ValueType()==JsonValueType::Object)c.speakers=json.GetNamedObject(L"speakers");
+        // 0.6 and older kept only the flat fields: they become this speaker's entry.
+        if(!s.address.empty()&&!c.speakers.HasKey(winrt::to_hstring(s.address))){JsonObject one;write_speaker(one,s);c.speakers.SetNamedValue(winrt::to_hstring(s.address),one);}
     }catch(...){}
-    return s;
+    return c;
 }
 static std::string icon_data(const std::filesystem::path& path){
     auto bytes=read_file(path);if(bytes.empty())return {};
@@ -96,6 +125,7 @@ public:
     std::map<std::wstring,WidgetRecord> widgets;
     WidgetIcons icons;
     WidgetSlots widget_slots=default_slots();     // the Home page's six buttons, chosen in Sound Lab
+    WidgetSpeakers widget_speakers;               // paired speakers this app controls (refresh_speakers)
     std::filesystem::path assets_path;
     bool artwork_loaded{},artwork_contrast{};
     COLORREF artwork_text{};
@@ -103,6 +133,17 @@ public:
     HDEVNOTIFY interface_notification{};
     std::vector<std::pair<HANDLE,HDEVNOTIFY>> radio_notifications;
     bool logging{}, provider_started{}, editor_started{};
+    bool chosen{};                                  // asked once which of two speakers to use
+    bool check_updates=true;int64_t last_update_check{};
+    bool tray{};                                    // Close to tray: closing the window hides it, the icon stays
+    bool quitting{};                                // Quit from the tray menu: really close
+    bool start_hidden{};                            // launched by the startup task at sign-in: start in the tray
+    HWND tray_window{};bool in_tray{};
+    std::wstring startup=L"unknown";                // Start with Windows: on|off|user-off|policy-on|policy-off|unavailable
+    std::wstring update_state=L"idle",update_version; // idle|checking|current|available|failed|dev|downloading|unverified|installing
+    std::optional<tribit::updates::Release> available;
+    static std::wstring app_version(){auto v=tribit::updates::app_version();return v.empty()?L"Development build":v;}
+    JsonObject memory{nullptr};                     // last-known values per speaker address (state.json "speakers")
     std::filesystem::path folder;
     std::mutex dispatch_mutex;
     std::deque<std::function<void()>> tasks;
@@ -116,7 +157,7 @@ public:
     bool web_failed{};
     std::deque<std::pair<Command,Clock::time_point>> waiting; // page writes held while a refresh runs
     App():folder(data_folder()){}
-    ~App(){spectrum.stop();web.reset();if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
+    ~App(){spectrum.stop();web.reset();if(in_tray){auto data=tray_data();Shell_NotifyIconW(NIM_DELETE,&data);}if(tray_window)DestroyWindow(tray_window);if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
     void post(std::function<void()> fn){ {std::lock_guard lock(dispatch_mutex);tasks.push_back(std::move(fn));}PostMessageW(dispatcher,AppDispatchMessage,0,0); }
     void dispatch(){std::deque<std::function<void()>> work;{std::lock_guard lock(dispatch_mutex);work.swap(tasks);}for(auto& fn:work){try{fn();}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}catch(const std::exception& e){diagnostic(e.what());}}}
     void diagnostic(const std::string& text){if(!logging)return;try{auto path=folder/L"diagnostics.log";std::error_code ec;bool reset=std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)>5*1024*1024;
@@ -128,12 +169,18 @@ public:
         WNDCLASSW wc{};wc.lpfnWndProc=window_proc;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"TribitConnect.Dispatcher";
         RegisterClassW(&wc);dispatcher=CreateWindowExW(0,wc.lpszClassName,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,wc.hInstance,this);
         if(!dispatcher)winrt::throw_last_error();
-        auto initial=load_cache(folder/L"state.json",logging);
-        load_widget_slots(read_library());
+        // An ordinary (never shown) window for the tray icon: message-only windows miss TaskbarCreated
+        // and cannot own the icon's menu.
+        WNDCLASSW tc{};tc.lpfnWndProc=window_proc;tc.hInstance=wc.hInstance;tc.lpszClassName=L"TribitConnect.Tray";RegisterClassW(&tc);
+        tray_window=CreateWindowExW(WS_EX_TOOLWINDOW,tc.lpszClassName,L"Tribit Connect",WS_POPUP,0,0,0,0,nullptr,nullptr,wc.hInstance,this);
+        auto cache=load_cache(folder/L"state.json");
+        logging=cache.logging;chosen=cache.chosen;check_updates=cache.check_updates;tray=cache.tray;last_update_check=cache.last_update_check;memory=cache.speakers;
         std::filesystem::create_directories(folder);
-        controller=std::make_unique<Controller>([this]{PostMessageW(dispatcher,StateMessage,0,0);},std::move(initial));
+        controller=std::make_unique<Controller>([this]{PostMessageW(dispatcher,StateMessage,0,0);},std::move(cache.initial));
+        load_widget_slots(read_library());   // the buttons of the speaker in use, so after the controller knows it
         // Results reach the page after the state they produced (both travel through the dispatcher).
         controller->on_result=[this](int id,bool ok,const std::string& error){post([this,id,ok,error]{web_result(id,ok,error);});};
+        refresh_speakers();
         power_notification=RegisterSuspendResumeNotification(dispatcher,DEVICE_NOTIFY_WINDOW_HANDLE);
         DEV_BROADCAST_DEVICEINTERFACE_W filter{};filter.dbcc_size=sizeof(filter);filter.dbcc_devicetype=DBT_DEVTYP_DEVICEINTERFACE;filter.dbcc_classguid=GUID_BTHPORT_DEVICE_INTERFACE;
         interface_notification=RegisterDeviceNotificationW(dispatcher,&filter,DEVICE_NOTIFY_WINDOW_HANDLE);
@@ -141,7 +188,7 @@ public:
         if(show)open(page);
         SetTimer(dispatcher,1,30000,nullptr);
     }
-    void interest(){bool active=editor!=nullptr;for(auto& [id,widget]:widgets)active|=widget.active;controller->interest(active);}
+    void interest(){bool active=editor!=nullptr&&IsWindowVisible(editor);for(auto& [id,widget]:widgets)active|=widget.active;controller->interest(active);}
     void recover(){
         // The board keeps the last card across provider restarts; start from it so an unchanged card is not resent.
         try{for(auto info:wp::WidgetManager::GetDefault().GetWidgetInfos()){auto context=info.WidgetContext();auto& record=widgets[std::wstring(context.Id())];
@@ -169,7 +216,7 @@ public:
         for(auto& [id,record]:widgets){
             reconcile_widget(record.view,s);if(!force&&!record.active)continue;
             try{
-                auto card=make_card(s,record.size,record.view,icons,logging,widget_slots);
+                auto card=make_card(s,record.size,record.view,icons,logging,widget_slots,widget_speakers);
                 bool new_template=card.tmpl!=record.last_template;
                 if(!new_template&&card.data==record.last_data)continue;
                 wp::WidgetUpdateRequestOptions update(id);
@@ -190,12 +237,22 @@ public:
         maybe_exit();
     }
     void save(const Snapshot& s){
-        try{JsonObject j;j.SetNamedValue(L"address",JsonValue::CreateStringValue(winrt::to_hstring(s.address)));j.SetNamedValue(L"firmware",JsonValue::CreateStringValue(winrt::to_hstring(s.firmware)));
-            j.SetNamedValue(L"logging",JsonValue::CreateBooleanValue(logging));j.SetNamedValue(L"checked",JsonValue::CreateNumberValue(static_cast<double>(s.checked)));
+        try{JsonObject j;j.SetNamedValue(L"address",JsonValue::CreateStringValue(winrt::to_hstring(s.address)));
+            j.SetNamedValue(L"logging",JsonValue::CreateBooleanValue(logging));
             j.SetNamedValue(L"release_when_hidden",JsonValue::CreateBooleanValue(s.release_when_hidden));
-            j.SetNamedValue(L"battery",JsonValue::CreateNumberValue(s.battery));j.SetNamedValue(L"preset",JsonValue::CreateNumberValue(s.preset));
-            j.SetNamedValue(L"auto_shutdown",JsonValue::CreateNumberValue(s.auto_shutdown));
-            j.SetNamedValue(L"prompts",write_array(s.prompts));j.SetNamedValue(L"buttons",write_array(s.buttons));
+            j.SetNamedValue(L"chosen",JsonValue::CreateBooleanValue(chosen));
+            j.SetNamedValue(L"check_updates",JsonValue::CreateBooleanValue(check_updates));
+            j.SetNamedValue(L"tray",JsonValue::CreateBooleanValue(tray));
+            j.SetNamedValue(L"last_update_check",JsonValue::CreateNumberValue(static_cast<double>(last_update_check)));
+            write_speaker(j,s);
+            // This speaker's own entry, only once it has reported something (a fresh choice keeps its old one).
+            if(!memory)memory=JsonObject();
+            if(!s.address.empty()){auto key=winrt::to_hstring(s.address);
+                if(s.checked){JsonObject one;write_speaker(one,s);memory.SetNamedValue(key,one);}
+                else{   // not read yet: keep what it last reported, but its own settings (the phone-app release) still count
+                    JsonObject one=memory.HasKey(key)&&memory.GetNamedValue(key).ValueType()==JsonValueType::Object?memory.GetNamedObject(key):JsonObject();
+                    one.SetNamedValue(L"release_when_hidden",JsonValue::CreateBooleanValue(s.release_when_hidden));memory.SetNamedValue(key,one);}}
+            j.SetNamedValue(L"speakers",JsonObject::Parse(memory.Stringify()));
             auto temporary=folder/L"state.tmp";{std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out<<winrt::to_string(j.Stringify());if(!out)throw std::runtime_error("Could not save settings.");}
             if(!MoveFileExW(temporary.c_str(),(folder/L"state.json").c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))winrt::throw_last_error();
         }catch(const std::exception& e){diagnostic(e.what());}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}
@@ -206,8 +263,17 @@ public:
         auto widget=widgets.find(id);if(widget==widgets.end())return;
         widget->second.active=true;interest();
         auto& view=widget->second.view;
+        if(verb==L"view.speakers")refresh_speakers();   // paired a moment ago: show it
         if(navigate_widget(view,verb)){update_widgets();return;}
         auto state=controller->snapshot();
+        // Speakers page: switch to another paired speaker (the one in use, not linked, tries again).
+        if(auto index=suffix_number(verb,L"speaker.choose.");index>=0){
+            if(index<static_cast<int>(widget_speakers.size())){auto sp=widget_speakers[index];
+                if(sp.in_use)controller->send({Operation::Retry});
+                else choose(sp.address);
+                view.page=WidgetPage::Home;update_widgets();}
+            return;
+        }
         if(auto command=setting_command(state,verb,widget_slots)){
             if(controller->send(*command)){view.proposed=*command;view.failed_write=false;update_widgets();}
             return;
@@ -239,18 +305,61 @@ public:
         std::string theme;{std::ifstream in(folder/L"theme",std::ios::binary);std::getline(in,theme);}
         web=std::make_unique<WebViewHost>(content,folder/L"WebView2",theme=="dark");
         web->on_message=[this](const std::wstring& text){web_message(text);};
-        web->on_closed=[this]{spectrum.stop();editor=nullptr;waiting.clear();interest();post([this]{if(web&&!web->window)web.reset();maybe_exit();});};
+        web->on_closed=[this]{spectrum.stop();editor=nullptr;waiting.clear();quitting=false;interest();post([this]{if(web&&!web->window)web.reset();update_tray();maybe_exit();});};
+        // Close to tray: the window hides and, like a closed one, stops listening and lets the speaker go.
+        web->on_close=[this]{return tray&&!quitting;};
+        web->on_shown=[this](bool shown){if(shown)spectrum.start();else spectrum.stop();interest();update_tray();};
         // No WebView2 runtime (or it failed to start): use the native window instead.
         web->on_failed=[this](HRESULT hr){diagnostic("WebView2 unavailable: "+winrt::to_string(winrt::hresult_error(hr).message()));
-            post([this]{web_failed=true;bool showing=web&&web->window;web.reset();if(showing)open_native(0);});};
+            post([this]{web_failed=true;bool showing=web&&web->visible();web.reset();update_tray();if(showing)open_native(0);});};
         spectrum.on_frame=[this](const Spectrum::Levels& levels,bool playing,bool listening){
             JsonObject m;m.SetNamedValue(L"type",JsonValue::CreateStringValue(L"spectrum"));
             m.SetNamedValue(L"playing",JsonValue::CreateBooleanValue(playing));m.SetNamedValue(L"listening",JsonValue::CreateBooleanValue(listening));
             JsonArray bands;for(float v:levels)bands.Append(JsonValue::CreateNumberValue(std::round(v*100)/100));m.SetNamedValue(L"bands",bands);
             auto json=std::wstring(m.Stringify());post([this,json]{if(web&&web->window)web->post(json);});
         };
-        spectrum.start();
-        editor=web->window;web->show();interest();
+        editor=web->window;
+        if(start_hidden){start_hidden=false;update_tray();}else web->show();   // shown: on_shown starts the spectrum
+        interest();
+        check_update(false);   // the daily look, if it is due and switched on
+        query_startup({});
+    }
+    // ---- Tray and Start with Windows ----------------------------------------------------------
+    // The icon shows while the window is open and Close to tray is on, and always while it is hidden
+    // (otherwise nothing would bring it back).
+    NOTIFYICONDATAW tray_data(){
+        NOTIFYICONDATAW data{sizeof(data)};data.hWnd=tray_window;data.uID=1;data.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP|NIF_SHOWTIP;
+        data.uCallbackMessage=TrayMessage;data.uVersion=NOTIFYICON_VERSION_4;
+        data.hIcon=static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr),MAKEINTRESOURCEW(1),IMAGE_ICON,GetSystemMetrics(SM_CXSMICON),GetSystemMetrics(SM_CYSMICON),0));
+        wcscpy_s(data.szTip,L"Tribit Connect");return data;
+    }
+    void update_tray(){
+        const bool want=tray_window&&web&&web->window&&(tray||!web->visible());
+        if(want&&!in_tray){auto data=tray_data();in_tray=Shell_NotifyIconW(NIM_ADD,&data);if(in_tray)Shell_NotifyIconW(NIM_SETVERSION,&data);}
+        else if(!want&&in_tray){auto data=tray_data();Shell_NotifyIconW(NIM_DELETE,&data);in_tray=false;}
+    }
+    void tray_event(UINT event){
+        if(event==NIN_SELECT||event==NIN_KEYSELECT||event==WM_LBUTTONUP){open(0);return;}
+        if(event!=WM_CONTEXTMENU&&event!=WM_RBUTTONUP)return;
+        HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"Open Tribit Connect");AppendMenuW(menu,MF_STRING,2,L"Quit");
+        POINT at{};GetCursorPos(&at);SetForegroundWindow(tray_window);
+        const int picked=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON,at.x,at.y,0,tray_window,nullptr);DestroyMenu(menu);
+        if(picked==1)open(0);
+        else if(picked==2&&web&&web->window){quitting=true;PostMessageW(web->window,WM_CLOSE,0,0);}
+    }
+    // Start with Windows is the package's startup task, which Windows owns: read it, or ask to change it,
+    // off the UI thread, then show what Windows says (it can refuse, e.g. when turned off in Settings > Apps > Startup).
+    void query_startup(std::optional<bool> want){
+        std::thread([this,want]{
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+            using winrt::Windows::ApplicationModel::StartupTask;using winrt::Windows::ApplicationModel::StartupTaskState;
+            std::wstring state=L"unavailable";   // not packaged (a development build)
+            try{auto task=StartupTask::GetAsync(StartupTaskId).get();auto s=task.State();
+                if(want){if(*want)s=task.RequestEnableAsync().get();else{task.Disable();s=task.State();}}
+                state=s==StartupTaskState::Enabled?L"on":s==StartupTaskState::EnabledByPolicy?L"policy-on":s==StartupTaskState::DisabledByPolicy?L"policy-off":
+                    s==StartupTaskState::DisabledByUser?L"user-off":L"off";}catch(...){}
+            post([this,state]{startup=state;refresh_editor();});
+        }).detach();
     }
     void refresh_editor(){if(native)native->refresh();if(web&&web->window)web->post(state_json());}
     std::filesystem::path library_path()const{return folder/L"profiles.json";}
@@ -267,6 +376,9 @@ public:
         JsonObject speaker;
         speaker.SetNamedValue(L"connected",JsonValue::CreateBooleanValue(connected));
         speaker.SetNamedValue(L"status",JsonValue::CreateStringValue(status));
+        speaker.SetNamedValue(L"settled",JsonValue::CreateBooleanValue(s.settled));
+        speaker.SetNamedValue(L"reason",JsonValue::CreateStringValue(connected?L"":winrt::to_hstring(s.reason)));
+        speaker.SetNamedValue(L"address",JsonValue::CreateStringValue(winrt::to_hstring(s.address)));
         speaker.SetNamedValue(L"error",JsonValue::CreateStringValue(winrt::to_hstring(s.error)));
         speaker.SetNamedValue(L"name",JsonValue::CreateStringValue(L"XSound Plus 2"));
         speaker.SetNamedValue(L"firmware",JsonValue::CreateStringValue(winrt::to_hstring(s.firmware)));
@@ -287,6 +399,13 @@ public:
         JsonObject settings;
         settings.SetNamedValue(L"release",JsonValue::CreateBooleanValue(s.release_when_hidden));
         settings.SetNamedValue(L"logging",JsonValue::CreateBooleanValue(logging));
+        settings.SetNamedValue(L"chosen",JsonValue::CreateBooleanValue(chosen));
+        settings.SetNamedValue(L"checkUpdates",JsonValue::CreateBooleanValue(check_updates));
+        settings.SetNamedValue(L"tray",JsonValue::CreateBooleanValue(tray));
+        settings.SetNamedValue(L"startup",JsonValue::CreateStringValue(startup));
+        settings.SetNamedValue(L"version",JsonValue::CreateStringValue(app_version()));
+        JsonObject update;update.SetNamedValue(L"state",JsonValue::CreateStringValue(update_state));update.SetNamedValue(L"version",JsonValue::CreateStringValue(update_version));
+        settings.SetNamedValue(L"update",update);
         JsonObject root;
         root.SetNamedValue(L"type",JsonValue::CreateStringValue(L"state"));
         root.SetNamedValue(L"speaker",speaker);root.SetNamedValue(L"settings",settings);
@@ -307,7 +426,12 @@ public:
     void load_widget_slots(const JsonValue& library){
         widget_slots=default_slots();
         if(library.ValueType()!=JsonValueType::Object)return;
-        auto slots=library.GetObject().GetNamedArray(L"widgetSlots",JsonArray());
+        // Each speaker has its own six buttons (widgetSlotsBy, by address); widgetSlots is the fallback.
+        auto root=library.GetObject();auto slots=root.GetNamedArray(L"widgetSlots",JsonArray());
+        if(controller&&root.HasKey(L"widgetSlotsBy")&&root.GetNamedValue(L"widgetSlotsBy").ValueType()==JsonValueType::Object){
+            auto by=root.GetNamedObject(L"widgetSlotsBy");auto key=winrt::to_hstring(controller->snapshot().address);
+            if(by.HasKey(key)&&by.GetNamedValue(key).ValueType()==JsonValueType::Array)slots=by.GetNamedArray(key);
+        }
         for(uint32_t i=0;i<std::min<uint32_t>(slots.Size(),static_cast<uint32_t>(widget_slots.size()));++i){
             if(slots.GetAt(i).ValueType()!=JsonValueType::Object)continue;
             auto o=slots.GetObjectAt(i);WidgetSlot slot{static_cast<int>(o.GetNamedNumber(L"preset",-1)),{},winrt::to_string(o.GetNamedString(L"name",L""))};
@@ -373,11 +497,120 @@ public:
         // Settings > Remove my data: profiles, settings and the log go; the page has already reset itself.
         if(type==L"removeData"){std::error_code ec;
             for(auto name:{L"profiles.json",L"profiles.tmp",L"state.json",L"state.tmp",L"theme",L"diagnostics.log"})std::filesystem::remove(folder/name,ec);
-            logging=false;load_widget_slots(JsonValue::CreateNullValue());update_widgets();refresh_editor();return;}
+            logging=false;chosen=false;check_updates=true;last_update_check=0;tray=false;memory=JsonObject();update_tray();
+            load_widget_slots(JsonValue::CreateNullValue());update_widgets();refresh_editor();return;}
         if(type==L"theme"){const bool dark=m.GetNamedBoolean(L"dark",false);web->theme(dark);
             try{std::ofstream(folder/L"theme",std::ios::binary|std::ios::trunc)<<(dark?"dark":"light");}catch(...){}return;}
         if(type==L"retry"){controller->send({Operation::Retry});return;}
+        if(type==L"listSpeakers"){web->post(speakers_json());return;}
+        // Only a paired, supported speaker can be chosen.
+        if(type==L"chooseSpeaker"){
+            auto wanted=tribit::parse_address(winrt::to_string(m.GetNamedString(L"address",L"")));if(!wanted)return;
+            auto list=tribit::list_speakers();
+            if(std::none_of(list.begin(),list.end(),[&](auto& d){return d.address==*wanted&&d.supported;}))return;
+            choose(tribit::format_address(*wanted));return;
+        }
+        // The speaker already in use was picked: only remember that the question was answered.
+        if(type==L"markChosen"){chosen=true;save(controller->snapshot());web->post(speakers_json());return;}
+        if(type==L"setCheckUpdates"){check_updates=m.GetNamedBoolean(L"value",true);save(controller->snapshot());refresh_editor();return;}
+        if(type==L"checkUpdate"){check_update(true);return;}
+        if(type==L"setTray"){tray=m.GetNamedBoolean(L"value",false);save(controller->snapshot());update_tray();refresh_editor();return;}
+        if(type==L"setStartup"){query_startup(m.GetNamedBoolean(L"value",false));return;}
+        if(type==L"installUpdate"){install_update();return;}
         if(type==L"openBluetooth"){ShellExecuteW(nullptr,L"open",L"ms-settings:bluetooth",nullptr,nullptr,SW_SHOWNORMAL);return;}
+        // The add-your-speaker site (repo tribit-connect-submit). Only this fixed address is opened.
+        // An optional model name rides along as ?model=, percent-encoded; nothing else is added.
+        if(type==L"openSubmit"){
+            std::wstring url=L"https://tribit-connect-submit.vercel.app/";
+            auto model=tribit::narrow(std::wstring(m.GetNamedString(L"model",L"")));
+            if(!model.empty()&&model.size()<=48){
+                std::wstring query=L"?model=";
+                for(unsigned char c:model){
+                    if(std::isalnum(c)||c=='-'||c=='_'||c=='.'||c=='~')query+=static_cast<wchar_t>(c);
+                    else{wchar_t hex[4];swprintf(hex,4,L"%%%02X",c);query+=hex;}
+                }
+                url+=query;
+            }
+            ShellExecuteW(nullptr,L"open",url.c_str(),nullptr,nullptr,SW_SHOWNORMAL);return;
+        }
+    }
+    // ---- Updates (GitHub Releases; see updates.hpp) ----------------------------------------------
+    void set_update(std::wstring state,std::wstring version={}){update_state=std::move(state);update_version=std::move(version);refresh_editor();}
+    // force: Check now, which skips the daily limit and the switch.
+    void check_update(bool force){
+        using namespace tribit::updates;
+        if(update_state==L"checking"||update_state==L"downloading"||update_state==L"installing")return;
+        auto current=parse_version(tribit::updates::app_version());
+        if(!current){if(force)set_update(L"dev");return;}   // an unpackaged build has no version to compare (stays: it never changes)
+        if(!force&&(!check_updates||now_seconds()-last_update_check<24*3600))return;
+        last_update_check=now_seconds();save(controller->snapshot());
+        set_update(L"checking");const int seq=++update_seq;
+        std::thread([this,cur=*current,seq]{
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+            const auto started=Clock::now();
+            std::optional<Release> release;bool failed=false;
+            try{release=newer_release(latest_json().get(),cur);}catch(...){failed=true;}   // offline or rate-limited
+            // Long enough to read "Checking…", so a second Check now visibly happens.
+            std::this_thread::sleep_until(started+700ms);
+            post([this,release,failed]{available=release;set_update(failed?L"failed":release?L"available":L"current",release?release->version:L"");});
+            // Then the key goes back to "Check now", ready for another look (an offer stays until used).
+            if(release)return;
+            std::this_thread::sleep_for(4s);
+            post([this,seq]{if(seq==update_seq&&(update_state==L"current"||update_state==L"failed"))set_update(L"idle");});
+        }).detach();
+    }
+    int update_seq{};   // the latest check, so an older one's reset never clears a newer result
+    void install_update(){
+        if(!available||update_state==L"downloading"||update_state==L"installing")return;
+        set_update(L"downloading",available->version);
+        std::thread([this,release=*available]{
+            winrt::init_apartment(winrt::apartment_type::multi_threaded);
+            winrt::hstring setup;try{setup=tribit::updates::download(release).get();}catch(...){}
+            post([this,setup,version=release.version]{
+                if(setup.empty()){set_update(L"unverified",version);return;}
+                set_update(L"installing",version);
+                // Setup closes this app and the widget for the moment it takes, then reopens Sound Lab.
+                ShellExecuteW(nullptr,L"open",setup.c_str(),L"/update",nullptr,SW_SHOWNORMAL);
+            });
+        }).detach();
+    }
+    // Switch to another paired speaker (Speakers page or widget), showing what it last reported.
+    void choose(const std::string& address){
+        save(controller->snapshot());    // keeps the speaker being left in memory
+        Snapshot known;auto key=winrt::to_hstring(address);
+        known.release_when_hidden=controller->snapshot().release_when_hidden;   // a speaker never set keeps the current choice
+        if(memory&&memory.HasKey(key)&&memory.GetNamedValue(key).ValueType()==JsonValueType::Object)read_speaker(memory.GetNamedObject(key),known);
+        chosen=true;controller->choose(address,known);
+        // That speaker's own widget buttons and "Let the phone app connect".
+        controller->release_when_hidden(known.release_when_hidden);load_widget_slots(read_library());
+        save(controller->snapshot());
+        refresh_speakers();update_widgets();
+        if(web&&web->window)web->post(speakers_json());
+    }
+    // Paired Tribit speakers for the Speakers page, and which one this app remembers.
+    std::wstring speakers_json(){
+        JsonArray list;
+        try{
+            for(auto& d:tribit::list_speakers()){
+                JsonObject o;
+                o.SetNamedValue(L"name",JsonValue::CreateStringValue(d.name));
+                o.SetNamedValue(L"model",JsonValue::CreateStringValue(d.model));
+                o.SetNamedValue(L"address",JsonValue::CreateStringValue(winrt::to_hstring(tribit::format_address(d.address))));
+                o.SetNamedValue(L"connected",JsonValue::CreateBooleanValue(d.connected));
+                o.SetNamedValue(L"supported",JsonValue::CreateBooleanValue(d.supported));
+                // When this app last read it (0 = never); the page says "last seen" for an off speaker.
+                auto key=winrt::to_hstring(tribit::format_address(d.address));
+                double seen=memory&&memory.HasKey(key)&&memory.GetNamedValue(key).ValueType()==JsonValueType::Object?memory.GetNamedObject(key).GetNamedNumber(L"checked",0):0;
+                o.SetNamedValue(L"seen",JsonValue::CreateNumberValue(seen*1000));
+                list.Append(o);
+            }
+        }catch(...){}
+        JsonObject root;
+        root.SetNamedValue(L"type",JsonValue::CreateStringValue(L"speakers"));
+        root.SetNamedValue(L"address",JsonValue::CreateStringValue(winrt::to_hstring(controller->snapshot().address)));
+        root.SetNamedValue(L"chosen",JsonValue::CreateBooleanValue(chosen));
+        root.SetNamedValue(L"list",list);
+        return std::wstring(root.Stringify());
     }
     void watch_radios(){
         for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}radio_notifications.clear();
@@ -397,6 +630,22 @@ public:
             if(event==DBT_DEVICEREMOVECOMPLETE)controller->lifecycle(Operation::Disconnect);
             watch_radios();
         }
+        // A speaker linked, dropped or was paired: the widget's Speakers page and Switch follow.
+        if(event==DBT_CUSTOMEVENT||event==DBT_DEVICEARRIVAL||event==DBT_DEVICEREMOVECOMPLETE){refresh_speakers();update_widgets();}
+    }
+    // Paired speakers this app can control, for the widget (twins go by their Windows names).
+    void refresh_speakers(){
+        WidgetSpeakers next;
+        try{
+            auto list=tribit::list_speakers();auto here=controller->snapshot().address;
+            for(auto& d:list){if(!d.supported)continue;
+                bool twin=std::count_if(list.begin(),list.end(),[&](auto& o){return o.supported&&o.model==d.model;})>1;
+                auto address=tribit::format_address(d.address);
+                next.push_back({tribit::narrow(twin?d.name:d.model),address,address==here,d.connected});}
+            // The one in use first, as on the Speakers page.
+            std::stable_partition(next.begin(),next.end(),[](auto& sp){return sp.in_use;});
+        }catch(...){}
+        widget_speakers=std::move(next);
     }
     void start_pipe(PSECURITY_DESCRIPTOR descriptor){
         pipe_thread=std::thread([this,descriptor]{
@@ -425,6 +674,10 @@ public:
             if(message==StateMessage){self->changed();return 0;}
             if(message==WM_DEVICECHANGE){self->device_event(wparam,lparam);return TRUE;}
             if(message==WM_POWERBROADCAST){if(wparam==PBT_APMSUSPEND)self->controller->lifecycle(Operation::Suspend);else if(wparam==PBT_APMRESUMEAUTOMATIC||wparam==PBT_APMRESUMESUSPEND)self->controller->lifecycle(Operation::Reconnect);return TRUE;}
+            if(message==TrayMessage){self->tray_event(LOWORD(lparam));return 0;}
+            // Explorer restarting clears every tray icon; put ours back.
+            static const UINT taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");
+            if(message==taskbar_created&&window==self->tray_window){self->in_tray=false;self->update_tray();return 0;}
             if(message==WM_TIMER&&window==self->dispatcher){KillTimer(window,1);self->maybe_exit();return 0;}
         }catch(const winrt::hresult_error& e){self->diagnostic(winrt::to_string(e.message()));}catch(const std::exception& e){self->diagnostic(e.what());}
         return DefWindowProcW(window,message,wparam,lparam);
@@ -451,9 +704,12 @@ struct ProviderFactory:winrt::implements<ProviderFactory,IClassFactory>{
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR arguments,int){
     bool provider=wcsstr(arguments,L"--provider")||wcsstr(arguments,L"-Embedding");
     DWORD start_page=wcsstr(arguments,L"--settings")?2:wcsstr(arguments,L"--device")?1:0;
+    bool startup=false;
     try{
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         winrt::init_apartment(winrt::apartment_type::single_threaded);
+        // Start with Windows: the startup task launches this process with no arguments, so ask how it was activated.
+        if(!provider)try{if(auto activated=winrt::Windows::ApplicationModel::AppInstance::GetActivatedEventArgs())startup=activated.Kind()==winrt::Windows::ApplicationModel::Activation::ActivationKind::StartupTask;}catch(...){}
         INITCOMMONCONTROLSEX common{sizeof(common),ICC_STANDARD_CLASSES|ICC_BAR_CLASSES};InitCommonControlsEx(&common);
         HANDLE token{};winrt::check_bool(OpenProcessToken(GetCurrentProcess(),TOKEN_QUERY,&token));DWORD bytes{};GetTokenInformation(token,TokenUser,nullptr,0,&bytes);std::vector<BYTE> buffer(bytes);winrt::check_bool(GetTokenInformation(token,TokenUser,buffer.data(),bytes,&bytes));CloseHandle(token);
         LPWSTR raw_sid{};winrt::check_bool(ConvertSidToStringSidW(reinterpret_cast<TOKEN_USER*>(buffer.data())->User.Sid,&raw_sid));std::wstring sid(raw_sid);LocalFree(raw_sid);
@@ -466,7 +722,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR arguments,int){
             LocalFree(descriptor);CloseHandle(mutex);return 0;
         }
         {
-            App app;app.pipe_name=pipe;app.init(!provider,static_cast<int>(start_page));app.start_pipe(descriptor);
+            App app;app.pipe_name=pipe;app.start_hidden=startup;app.init(!provider,static_cast<int>(start_page));app.start_pipe(descriptor);
             auto factory=winrt::make<ProviderFactory>(app);DWORD cookie{};
             winrt::check_hresult(CoRegisterClassObject(ProviderClsid,factory.get(),CLSCTX_LOCAL_SERVER,REGCLS_MULTIPLEUSE,&cookie));
             MSG msg{};while(GetMessageW(&msg,nullptr,0,0)>0){if(app.dialog&&IsDialogMessageW(app.dialog,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}

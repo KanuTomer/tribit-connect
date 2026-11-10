@@ -59,6 +59,59 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .plate-name{display:flex;align-items:baseline;gap:12px;white-space:nowrap}
 .plate-name .model{font-weight:700;font-stretch:125%;font-size:20px;letter-spacing:-.01em}
 .plate-name{margin-right:auto}   /* the right-hand group stays put when the mini speaker appears */
+/* ‹ Speakers: back to the app's home (the Speakers page); only on a speaker's page */
+.plate-name{align-items:center}
+.plate-name .mech.back{height:30px;padding:0 12px;font-size:11px}
+.app.racked .mech.back,.app.booting .mech.back{display:none}
+
+/* ── Speakers: laid out like the home page ─────────────────────────────────────
+   The stage shows the speaker selected; the bank is a SPEAKERS selector, as on an amp (A, B, C…),
+   one latching key per paired Tribit speaker. The title bar keeps only the app name and the window
+   buttons: the battery, link and Settings belong to one speaker, and none is in use here. */
+.rack{grid-row:2/4;display:grid;grid-template-rows:minmax(0,1fr) 168px;min-height:0}
+.rack[hidden]{display:none}
+.app.racked .stage,.app.racked .surface,.app.racked>.bank,.app.racked .library{display:none}
+/* No speaker is in use here: no battery or link. SETTINGS stays, for the app's own settings. */
+.app.racked .mini-speaker,.app.racked .instruments{display:none}
+/* Booting: until the first connect attempt settles, only the title bar shows, so the instrument
+   never flashes before the Speakers page (and the page never flashes before the instrument). */
+.app.booting .stage,.app.booting .surface,.app.booting>.bank,.app.booting .library,.app.booting .instruments,
+.app.booting #deviceBtn,.app.booting .mini-speaker{visibility:hidden}
+.pick{display:grid;place-items:center;align-content:center;gap:22px;padding:24px;overflow:hidden;background:var(--tex),var(--ivory);min-height:0}
+.pick-art{width:min(760px,60vw,calc((100vh - 400px) * 2.6));min-width:420px}
+.pick-art .speaker{width:100%;display:block;filter:drop-shadow(0 18px 22px #00000026)}
+:root[data-theme=dark] .pick-art .speaker{filter:drop-shadow(0 18px 26px #000b)}
+.pick-art.off .speaker{filter:grayscale(1) brightness(.85);opacity:.5}
+.pick-art[hidden]{display:none}
+.pick-info{display:grid;justify-items:center;gap:12px;text-align:center}
+.pick-info h2{font-weight:700;font-stretch:125%;font-size:30px;letter-spacing:-.01em;line-height:1.1}
+.pick-info .state{display:flex;align-items:center;gap:8px}
+.pick-info p{max-width:52ch;color:var(--ink-2);font-size:14px}
+.pick-info .acts{display:flex;gap:10px}
+.pick-info .mech{min-width:128px}
+.pick-info .mech.go{background:linear-gradient(#ff7a3a,var(--orange));color:#fff;border-color:var(--orange-edge);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
+.pick-info .mech.go:active:not(:disabled){box-shadow:0 0 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
+/* the selector: the program bank's panel and key family, keys wide enough for a model name */
+.rack .spk-bank{grid-row:2}
+.app.racked.offline .rack .spk-keys .pkey.spk{filter:none}
+.app.racked .rack .spk-keys .pkey.spk.add{width:84px;opacity:1;margin-left:0;padding:8px 8px 7px;border-width:1.5px}
+.app.racked .rack .spk-keys .pkey.spk.add:active{transform:translateY(3px)}
+.spk-keys{display:flex;gap:16px;align-items:flex-end;min-width:0;flex:1;overflow-x:auto;scrollbar-width:thin;scrollbar-color:#4a4945 transparent}
+.spk-keys .group{flex:none}
+.spk-keys .group-label.blank::after{display:none}
+.spk-keys .row{padding-left:2px;padding-right:2px}
+.pkey.spk{--kw:clamp(128px,11vw,164px)}
+.pkey.spk .t{font-size:12px;font-weight:600;font-stretch:90%}
+.pkey.spk.foreign{background:var(--key-user)}
+/* latched: the selected key stays down, as a selector button does */
+.pkey.spk[aria-checked=true]{transform:translateY(3px);box-shadow:0 0 0 var(--key-edge),inset 0 2px 5px #0004}
+.pkey.spk .led.on{background:var(--blue-light);box-shadow:0 0 8px #3d8bffaa}
+.pkey.spk .led.busy{background:var(--amber);animation:blink .5s steps(2) infinite}
+.pkey.spk .led.err{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+.pkey.spk.add{--kw:84px}
+.app.racked.arriving .pick-art,.app.racked.arriving .pick-info{animation:rise .5s var(--ease) both}
+.app.racked.arriving .spk-keys .pkey{animation:fall .4s var(--ease) both}
+.app.racked.leaving .pick-art,.app.racked.leaving .pick-info{animation:sinkout .26s var(--ease) forwards}
 .instruments{display:flex;align-items:center;gap:18px}
 .meter{display:block}
 .meter .face{fill:var(--paper);stroke:var(--meter-edge)}
@@ -342,6 +395,14 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .dv-row{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--rule)}.dv-row .mech{flex:1;height:30px;font-size:11px}
 .dv-note{font-size:11.5px;color:var(--ink-3);margin-top:10px;line-height:1.45}
 .dv-err{font-size:12.5px;color:var(--orange);margin:0 0 10px}
+/* a speaker's settings: one line under its name (firmware, and why there is no link when there is none) */
+.dv-sub{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);margin:-4px 0 12px}
+.dv-hint{font-size:12.5px;color:var(--ink-2);margin:2px 0 4px;line-height:1.45}
+.sheet section .dv-row{border-top:0}
+/* updates: the version on the left, the keys on the right */
+.dv-update{align-items:center}.dv-update .dv-ver{flex:1;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.dv-update .mech{flex:none;padding:0 12px}
+.dv-update .mech.go{background:linear-gradient(#ff7a3a,var(--orange));color:#fff;border-color:var(--orange-edge);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
 .dv-remove{padding-top:10px}.dv-remove p{font-size:12.5px;margin-bottom:8px}.dv-remove .dv-row{border-top:0;padding-top:0}
 .dv-link{font-size:11.5px;color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}.dv-link:hover{color:var(--ink)}
 .mech.danger{background:linear-gradient(#ef6a4c,var(--high));color:#fff;border-color:#8f2b12;box-shadow:0 2px 0 #8f2b12,inset 0 1px 0 #ffffff50}

@@ -149,13 +149,124 @@ function offlineCard(){
   if(S.linked()){if(!el.hidden&&!el.classList.contains('closing')){el.classList.add('closing');
     setTimeout(()=>{el.classList.remove('closing');if(S.linked())el.hidden=true;},S.reduce()?0:220);}return;}
   el.classList.remove('closing');el.hidden=false;
+  // Shown only for the moment before the Speakers page takes over (the grace period after a drop).
   const seen=s.lastSeen?new Date(s.lastSeen).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
-  const why=connecting?'Opening the control link…':s.status==='unavailable'&&s.error?esc(s.error):
-    'Turn it on and check it is paired with this PC. It takes one controller at a time, so close the Tribit app on your phone.';
-  el.innerHTML=`<span class="engr"><span class="led ${connecting?'amber blink':'orange'}"></span>${connecting?'Connecting':'Speaker not connected'}</span>
-    <p>${why}${seen&&!connecting?`<br>Last seen ${seen}; the lights and programs show what was read then.`:''}</p>
-    ${connecting?'':'<div class="acts"><button class="mech" data-dv="retry">Reconnect</button><button class="mech" data-dv="bt">Bluetooth settings</button></div>'}`;
+  const r=M.dropReason(s.reason,s.error);
+  el.innerHTML=`<span class="engr"><span class="led ${connecting?'amber blink':'orange'}"></span>${connecting?'Connecting':esc(r.word)}</span>
+    <p>${connecting?'Opening the speaker’s controls…':esc(r.hint)}${seen&&!connecting?`<br>Last seen ${seen}; the lights and programs show what was read then.`:''}</p>
+    ${connecting?'':reasonKeys(r)}`;
 }
+// The keys a missing link can offer: Try again only for busy controls; Bluetooth settings otherwise.
+function reasonKeys(r,go=false){
+  const k=r.key==='retry'?`<button class="mech${go?' go':''}" data-dv="retry">Try again</button>`:r.key==='bt'?`<button class="mech${go?' go':''}" data-dv="bt">Bluetooth settings</button>`:'';
+  return k?`<div class="acts">${k}</div>`:'';
+}
+// The name on the title bar: the speaker in use (its Windows name when two of one model are
+// paired), or the app's own name while nothing is in use (booting, the Speakers page).
+function titleName(){
+  if($('app').classList.contains('booting')||rk.why)return 'Tribit Connect';
+  const sp=S.speakers,d=sp?.list.find(x=>x.address===sp.address);if(!d)return 'XSound Plus 2';
+  return sp.list.some(o=>o!==d&&o.model===d.model)?d.name:d.model;
+}
+const lastSeen=ms=>ms?new Date(ms).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
+// ---- Speakers page ---------------------------------------------------------------------------------
+// The paired Tribit speakers, on a SPEAKERS selector with the one selected on the stage. It appears only when the app cannot carry on by itself
+// (M.rackReason: the speaker gone past the grace period, or two to choose from), or when the model
+// name is clicked. The editor stays as it was underneath, so a speaker coming back returns to it,
+// draft and all; Audition stops with the link (render), and the sheet and library close.
+const rk={why:null,downAt:0,timer:0,poll:0,launch:true};
+function rackTick(){
+  if(!S.ready())return;
+  const s=S.speaker,linked=S.linked(),hidden=document.hidden,booting=!S.settled;
+  // Until the first connect attempt has finished, only the title bar shows (no instrument flash).
+  // The cover lifts only after the launch decision, so the instrument never shows before the page.
+  const wasBooting=$('app').classList.contains('booting');
+  if(linked||hidden)rk.downAt=0;else if(!rk.downAt)rk.downAt=Date.now();
+  const downFor=rk.downAt?Date.now()-rk.downAt:0;
+  const why=M.rackReason({linked,status:s.status,hidden,downFor,list:S.speakers?.list,chosen:S.chosen,booting,launch:rk.launch});
+  // The launch decision is made once, as soon as the attempt settles (connecting waits for its end).
+  if(!booting&&s.status!=='connecting')rk.launch=false;
+  clearTimeout(rk.timer);
+  if(!why&&rk.downAt)rk.timer=setTimeout(rackTick,Math.max(50,M.RACK_GRACE-downFor+20));
+  // After a switch the page waits for the old link to drop and the new one to come up.
+  if(rk.why==='switch'){if(!linked)rk.dropped=true;else if(rk.dropped)closeRack();return;}
+  if(why&&!rk.why)openRack(why,wasBooting);
+  // A page opened for a missing speaker stays until it links (not merely until the rule goes quiet).
+  else if(!why&&rk.why&&rk.why!=='manual'&&(rk.why!=='down'||linked))closeRack();
+  if(wasBooting&&!booting&&(s.status!=='connecting'||S.bootOver)){$('app').classList.remove('booting');render();}
+}
+// instant: the launch decision, made under the boot cover, so there is nothing to fade from.
+function openRack(why,instant=false){
+  if(rk.why)return;rk.why=why;rk.order=null;rk.sel=null;
+  hideCtx();toggleSheet(false);ui.choosing=null;if(ui.library)toggleLibrary(false);
+  S.listSpeakers();clearInterval(rk.poll);rk.poll=setInterval(()=>{if(!document.hidden)S.listSpeakers();},4000);   // a speaker paired meanwhile appears
+  const show=()=>{$('rack').hidden=false;$('app').classList.add('racked');$('modelBtn').textContent=titleName();rack();};
+  if(instant)show();else S.transition(show);
+}
+function closeRack(){
+  if(!rk.why)return;rk.why=null;clearInterval(rk.poll);toggleSheet(false);   // the app's settings belong to the page being left
+  S.transition(()=>{$('rack').hidden=true;$('app').classList.remove('racked');lastDisplay=null;render();});
+}
+function rack(){
+  const sp=S.speakers,s=S.speaker,here=sp?.address;
+  // The order is set when the page opens and kept while it is up, so a switch never reshuffles it.
+  if(!rk.order&&sp)rk.order=M.rackOrder(sp.list,here).map(d=>d.address);
+  const at=d=>{const i=rk.order?rk.order.indexOf(d.address):-1;return i<0?1e3:i;};
+  const list=M.rackOrder(sp?.list,here).sort((a,b)=>at(a)-at(b));
+  // Two of the same model go by the names they have in Windows.
+  const twin=d=>list.some(o=>o!==d&&o.model===d.model);
+  const label=d=>twin(d)?d.name:d.model;
+  // The key selected: the one in use, until another is pressed.
+  if(!list.some(d=>d.address===rk.sel))rk.sel=(list.find(d=>d.address===here)||list.find(d=>d.supported)||list[0])?.address;
+  const view=d=>{const mine=d.address===here,linked=mine&&S.linked(),connecting=mine&&s.status==='connecting';
+    return {mine,linked,connecting,dropped:mine&&!linked&&!connecting};};
+  // ---- the selector: A, B, C… as on an amp; the lamp is the link (this app's, or Windows' for the others)
+  const key=(d,i)=>{const v=view(d),lamp=v.connecting?'busy':v.linked||(!v.mine&&d.connected)?'on':v.dropped?'err':'';
+    return `<button class="pkey spk${d.supported?'':' foreign'}" role="radio" aria-checked="${d.address===rk.sel}" data-tune="${esc(d.address)}" tabindex="${d.address===rk.sel?0:-1}">
+      <span class="led ${lamp}"></span><span class="n">${String.fromCharCode(65+i)}</span><span class="t">${esc(label(d))}</span></button>`;};
+  const sup=list.filter(d=>d.supported),other=list.filter(d=>!d.supported);let i=0;
+  const group=(name,ds)=>ds.length?`<div class="group"><span class="group-label">${name}</span><div class="row">${ds.map(d=>key(d,i++)).join('')}</div></div>`:'';
+  // Pairing happens in Windows; the dashed key, like "+ new" on the program bank, opens it.
+  const pair='<div class="group"><span class="group-label blank">&nbsp;</span><div class="row"><button class="pkey add spk" data-dv="bt" aria-label="Pair a speaker in Bluetooth settings"><span class="n">+</span><span class="t">pair</span></button></div></div>';
+  morph($('spkkeys'),!sp?'':group('SUPPORTED',sup)+group('NOT SUPPORTED YET',other)+pair);
+  // ---- the stage: the speaker selected
+  const d=list.find(x=>x.address===rk.sel),art=$('pickart');
+  if(!d){art.hidden=true;
+    morph($('pickinfo'),!sp?'':`<h2>No Tribit speaker</h2><p>Pair your speaker with this PC in Bluetooth settings, and it appears here.</p>
+      <div class="acts"><button class="mech go" data-dv="bt">Bluetooth settings</button></div>`);return;}
+  const v=view(d);
+  // Only the XSound Plus 2 has a drawing; other models get their name, never a guessed shape.
+  art.hidden=!d.supported;
+  if(d.supported){
+    const state=v.connecting?'connecting':v.linked||(!v.mine&&d.connected)?'linked':'off';
+    if(!art.firstChild)art.innerHTML=Speaker.svg({light:-1,state,id:'pick',interactive:false});
+    Speaker.set(art,{light:v.linked?S.lit():-1,state});art.classList.toggle('off',state==='off');
+  }
+  // The speaker in use without a link says why (M.dropReason) and offers only a key that can help:
+  // Try again for busy controls, Bluetooth settings otherwise. Never "Reconnect".
+  const r=v.dropped?M.dropReason(s.reason,s.error):null;
+  const seen=!v.linked&&!v.connecting&&d.seen?`Last seen ${lastSeen(d.seen)}`:'';
+  const [led,word]=!d.supported?['','']:v.connecting?['amber blink','Connecting']:v.linked?['','']:r?['orange',r.word]:
+    d.connected?['','']:['','Off or out of range'];
+  const act=!d.supported?`<button class="mech go" data-help="${esc(d.model)}">Help add it</button>`:
+    v.connecting?'':r?reasonKeys(r,true).replace(/^<div class="acts">|<\/div>$/g,''):
+    `<button class="mech go" data-open="${esc(d.address)}">Open</button>`;
+  const why=!d.supported?`Tribit Connect cannot control the ${esc(d.model)} yet. A short Bluetooth log from your phone helps add it.`:
+    r?esc(r.hint):!v.mine&&!d.connected?'Turn it on and choose Open; the app connects once Windows has it.':'';
+  // The name is on the stage only when there is no drawing, or when two of one model need telling apart.
+  morph($('pickinfo'),`${!d.supported||twin(d)?`<h2>${esc(label(d))}</h2>`:''}${word?`<span class="state engr">${led?`<span class="led ${led}"></span>`:''}${word}${seen?` · ${seen}`:''}</span>`:''}
+    ${why?`<p>${why}</p>`:''}<div class="acts">${act}</div>`);
+}
+// Selecting: press a key, or the arrow keys along the selector.
+function tune(address){rk.sel=address;rack();$('spkkeys').querySelector(`[data-tune="${CSS.escape(address)}"]`)?.focus({preventScroll:true});}
+$('spkkeys').addEventListener('click',e=>{const k=e.target.closest('[data-tune]');if(k)tune(k.dataset.tune);});
+$('spkkeys').addEventListener('keydown',e=>{
+  const step={ArrowLeft:-1,ArrowUp:-1,ArrowRight:1,ArrowDown:1}[e.key];if(!step)return;e.preventDefault();
+  const all=[...$('spkkeys').querySelectorAll('[data-tune]')],i=all.findIndex(b=>b.dataset.tune===rk.sel);
+  const next=all[Math.max(0,Math.min(all.length-1,i+step))];if(next)tune(next.dataset.tune);
+});
+document.addEventListener('visibilitychange',rackTick);
+
 // Engraved conduits from each module down to the EQ button; the playing light's is lit.
 // Three wires ease down from the modules and meet the button's ring side by side; the playing
 // light's wire carries that light's colour.
@@ -366,7 +477,10 @@ function render(){
   if(off)ui.choosing=null;
   $('app').classList.toggle('offline',off);
   instruments();speakerArt();bank();offlineCard();library();
-  if(ui.mode==='listen')units();else surface();
+  if(!$('rack').hidden)rack();
+  else if(ui.mode==='listen')units();else surface();
+  rackTick();
+  const name=titleName();if($('modelBtn').textContent!==name)$('modelBtn').textContent=name;
   // An open list in the sheet would close if it were redrawn under the pointer.
   const f=document.activeElement;
   if(!$('sheet').hidden&&!(f?.tagName==='SELECT'&&$('sheet').contains(f)))sheet();
@@ -374,36 +488,74 @@ function render(){
 S.subscribe(render);
 S.onAuditionError=err=>{aud.on=false;aud.before=null;toast('Audition stopped: '+err);render();};
 
-// ---- device sheet ---------------------------------------------------------------------------------
+// ---- settings: one SETTINGS key whose contents follow the page --------------------------------------
+// On the Speakers page (the app's home) it holds the app's settings: appearance, updates, help. On a
+// speaker's page it holds that speaker's: beeps, auto shutdown, and its widget (buttons and "Let the
+// phone app connect"). Nothing appears in both. It updates in place, so switches and the picker animate.
 const BEEPS=['Power','Pairing','Low battery','Max volume','Party (TWS)'];
-// Settings, in three groups: the speaker itself, how it works with Windows, and the look.
-// The widget's buttons are picked from a layout of the widget; the picker lists any number of
-// programs in a scrolling list. The sheet is updated in place, so switches and the picker animate.
-function sheet(){
-  const s=S.speaker,st=S.settings,can=S.linked();
-  const sw=(on,label,hint,act,dis)=>`<button class="dv-sw" data-dv="${act}" role="switch" aria-checked="${on}"${dis?' disabled':''}><span><b>${label}</b><small>${hint}</small></span><i></i></button>`;
+const sw=(on,label,hint,act,dis)=>`<button class="dv-sw" data-dv="${act}" role="switch" aria-checked="${on}"${dis?' disabled':''}><span><b>${label}</b><small>${hint}</small></span><i></i></button>`;
+function speakerSheet(){
+  const s=S.speaker,st=S.settings,can=S.linked(),connecting=s.status==='connecting',r=M.dropReason(s.reason,s.error);
+  // One line under the name: firmware, and why there is no link when there is none.
+  const facts=[s.firmware?`Firmware ${esc(s.firmware)}`:'',can?'':connecting?'Connecting':esc(r.word),!can&&s.lastSeen?`last seen ${lastSeen(s.lastSeen)}`:''].filter(Boolean).join(' · ');
   const keys=S.widget(),pick=ui.wpick,shown=pick??ui.lastPick??0;
   const item=p=>`<button class="pk" data-wset="${p.key}" aria-pressed="${keys[shown]===p.key}"><span>${esc(p.name)}</span></button>`;
-  morph($('sheet'),`${s.error?`<p class="dv-err">${esc(s.error)}</p>`:''}
-    <section><h4 class="engr">Speaker</h4>
-      <div class="dv-label">Beeps</div>
+  return `<section><h4 class="engr">${esc(titleName())}</h4>
+      ${facts?`<p class="dv-sub">${!can&&!connecting?'<span class="led orange"></span>':''}${facts}</p>`:''}
+      ${!can&&!connecting&&r.hint?`<p class="dv-hint">${esc(r.hint)}</p>`:''}
+      ${!can&&!connecting&&r.key==='retry'?'<div class="dv-row"><button class="mech" data-dv="retry">Try again</button></div>':''}
+      <div class="dv-label">Beeps${can?'':' <small>last known</small>'}</div>
       <div class="dv-chips">${BEEPS.map((l,i)=>`<button class="chip" data-dv="p${i}" aria-pressed="${s.prompts?.[i]===1}"${!can||s.prompts?.[i]<0?' disabled':''}>${l}</button>`).join('')}</div>
       ${sw(s.autoShutdown===1,'Auto shutdown','Turns off when nothing has played for a while','auto',!can||s.autoShutdown<0)}
     </section>
-    <section><h4 class="engr">Windows</h4>
+    <section><h4 class="engr">Widget</h4>
       <div class="dv-label">Widget buttons <small>Win + W</small></div>
       <div class="dv-wgrid">${keys.map((k,i)=>`<button class="wtile" data-wpick="${i}" aria-expanded="${pick===i}"><small>${i+1}</small>${esc(S.find(k).name)}</button>`).join('')}</div>
       <div class="dv-pick${pick!=null?' open':''}"><div><div class="dv-list" role="group" aria-label="Button ${shown+1} plays">
         <h5>Factory</h5>${S.factory.map(item).join('')}${S.custom().length?`<h5>Yours · ${S.custom().length}</h5>${S.custom().map(item).join('')}`:''}</div></div></div>
-      ${sw(!!st.release,'Let the phone app connect','Frees the speaker shortly after the widget closes','release')}
-      ${sw(!!st.logging,'Diagnostic log','Only needed for troubleshooting','logging')}
+      ${sw(!!st.release,'Let the phone app connect','Frees this speaker shortly after the widget closes','release')}
     </section>
-    <section><h4 class="engr">Appearance</h4><div class="dv-seg" role="group" aria-label="Appearance">${[['light','Light'],['dark','Dark'],['device','Windows']].map(([v,l])=>
+    <p class="dv-note">Rename, power off, factory reset and firmware updates: use the Tribit app.</p>`;
+}
+// Updates: what the host reports (updates.hpp), as one line and at most two keys.
+function updateRow(){
+  const st=S.settings,u=st.update||{},v=u.version?esc(u.version):'';
+  const status={checking:['Checking…',true],current:['Up to date',false],failed:['Couldn’t check. Try again',false],dev:['Development build',true],
+    available:[`${v} is available`,false],downloading:['Downloading…',true],unverified:['Update didn’t verify. Try again',false],installing:['Installing…',true]}[u.state];
+  const check=`<button class="mech" data-dv="check"${status?.[1]?' disabled':''}>${status?status[0]:'Check now'}</button>`;
+  const install=u.state==='available'||u.state==='unverified'?`<button class="mech go" data-dv="install">Update to ${v}</button>`:'';
+  return `${sw(st.checkUpdates!==false,'Check for updates','Once a day, from this project’s GitHub releases. Nothing about you is sent.','updates')}
+    <div class="dv-row dv-update"><span class="dv-ver">Version ${esc(st.version||'')}</span>${install}${u.state==='available'?'':check}</div>`;
+}
+// Start with Windows: the package's startup task, as Windows reports it (app.cpp query_startup).
+function startupRow(){
+  const v=String(S.settings.startup||'unknown'),on=v==='on'||v==='policy-on';
+  const hint={'user-off':'Turned off in Windows Settings > Apps > Startup. Turn it on there first.','policy-on':'Set by your organisation','policy-off':'Turned off by your organisation',
+    unavailable:'Only in the installed app',unknown:'Checking…'}[v]||'Opens in the tray when you sign in, so the widget is ready';
+  return sw(on,'Start with Windows',hint,'startup',v.startsWith('policy')||v==='unavailable'||v==='unknown');
+}
+function appSheet(){
+  const st=S.settings;
+  return `<section><h4 class="engr">Appearance</h4><div class="dv-seg" role="group" aria-label="Appearance">${[['light','Light'],['dark','Dark'],['device','Windows']].map(([v,l])=>
       `<button data-theme-choice="${v}" aria-pressed="${Theme.choice===v}">${l}</button>`).join('')}</div></section>
-    <div class="dv-row"><button class="mech" data-dv="retry">Reconnect</button><button class="mech" data-dv="bt">Bluetooth</button></div>
-    <div class="dv-remove">${ui.removing?`<p>Remove all profiles and settings from this PC?</p><div class="dv-row"><button class="mech danger" data-dv="remove-yes">Remove</button><button class="mech" data-dv="remove-no">Keep</button></div>`:
-      `<button class="dv-link" data-dv="remove">Remove my data…</button>`}</div>
-    <p class="dv-note">${s.firmware?`Firmware ${esc(s.firmware)}. `:''}Rename, power off, factory reset and firmware updates: use the Tribit app.</p>`);
+    <section><h4 class="engr">Window</h4>
+      ${sw(!!st.tray,'Close to tray','Closing keeps Tribit Connect in the notification area. Quit from its menu there.','tray')}
+      ${startupRow()}
+    </section>
+    <section><h4 class="engr">Updates</h4>${updateRow()}</section>
+    <section><h4 class="engr">Help</h4>
+      ${sw(!!st.logging,'Diagnostic log','Only needed for troubleshooting','logging')}
+      <div class="dv-remove">${ui.removing?`<p>Remove all profiles and settings from this PC?</p><div class="dv-row"><button class="mech danger" data-dv="remove-yes">Remove</button><button class="mech" data-dv="remove-no">Keep</button></div>`:
+        `<button class="dv-link" data-dv="remove">Remove my data…</button>`}</div>
+      <p class="dv-note"><button class="dv-link" data-dv="submit">Another Tribit speaker? Help add it</button></p>
+    </section>`;
+}
+// Which settings SETTINGS shows: the app's on the Speakers page, the speaker's everywhere else.
+const sheetKind=()=>rk.why?'app':'speaker';
+function sheet(){
+  const el=$('sheet'),kind=sheetKind();el.setAttribute('aria-label',kind==='speaker'?`${titleName()} settings`:'Tribit Connect settings');
+  if(el.dataset.kind!==kind){el.dataset.kind=kind;el.replaceChildren();}
+  morph(el,kind==='speaker'?speakerSheet():appSheet());
 }
 // Brings `el` in line with `html` node by node, keeping the elements that are still there, so
 // their CSS transitions run (switches slide, lamps fade) instead of being redrawn.
@@ -424,8 +576,9 @@ document.addEventListener('click',e=>{
   const ws=e.target.closest?.('[data-wset]');if(ws&&ui.wpick!=null){e.stopImmediatePropagation();S.setWidget(ui.wpick,ws.dataset.wset);ui.wpick=null;sheet();}
 });
 function toggleSheet(open){
-  const el=$('sheet');$('deviceBtn').setAttribute('aria-expanded',open);clearTimeout(toggleSheet.t);el.classList.remove('closing');
-  if(open){el.hidden=false;sheet();return;}
+  const el=$('sheet');clearTimeout(toggleSheet.t);el.classList.remove('closing');
+  $('deviceBtn').setAttribute('aria-expanded',open);
+  if(open){ui.wpick=null;ui.removing=false;el.hidden=false;sheet();return;}
   if(el.hidden)return;el.classList.add('closing');toggleSheet.t=setTimeout(()=>{el.hidden=true;el.classList.remove('closing');},S.reduce()?0:160);
 }
 
@@ -436,6 +589,10 @@ function toast(text,action){
   if(action)t.querySelector('button').onclick=()=>{action.run();t.remove();};
   document.body.append(t);ui.toast=t;setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},action?7000:3200);
 }
+// A program pressed without a link: say why, and offer Try again only when it can help.
+function notLinked(){const r=M.dropReason(S.speaker.reason,S.speaker.error);
+  const text={busy:'The speaker’s controls are busy',off:'The speaker is off or out of range',bluetooth:'Bluetooth is unavailable'}[S.speaker.reason]||'The speaker is not connected';
+  toast(text,r.key==='retry'?{label:'Try again',run:()=>S.send({type:'retry'})}:undefined);}
 async function play(p){ui.pending=p.key;const r=await S.apply(p);ui.pending=null;if(!r.ok)toast(r.error);}
 // Audition: remember what played before, stream the draft, and put it back when the draft goes.
 const raw=bands=>({preset:M.CUSTOM,bands});
@@ -506,6 +663,15 @@ document.addEventListener('click',async e=>{
     return;}
   if(!t.closest('#ctx'))hideCtx();
   const win=t.closest('[data-win]');if(win){Bridge.send({type:'window',action:win.dataset.win});return;}
+  // ‹ Speakers: back to the app's home, the Speakers page.
+  if(t.closest('#backBtn')){toggleSheet(false);openRack('manual');return;}
+  const op=t.closest('[data-open]');
+  if(op){const a=op.dataset.open;
+    // The speaker in use: back to it. Another: switch, and the page closes once it links.
+    if(a===S.speakers?.address&&S.linked()){S.choose(a,false);closeRack();}
+    else{rk.why='switch';rk.dropped=false;S.choose(a);}
+    return;}
+  const help=t.closest('[data-help]');if(help){S.send({type:'openSubmit',model:help.dataset.help});return;}
   const dv=t.closest('[data-dv]')?.dataset.dv;
   const th=t.closest('[data-theme-choice]');if(th){Theme.set(th.dataset.themeChoice);sheet();return;}
   if(dv){const s=S.speaker;
@@ -516,7 +682,11 @@ document.addEventListener('click',async e=>{
     else if(dv==='logging')S.send({type:'setLogging',value:!S.settings.logging});
     else if(dv==='remove'||dv==='remove-no'){ui.removing=dv==='remove';sheet();}
     else if(dv==='remove-yes'){ui.removing=false;S.removeData();ui.mode==='edit'&&leaveEdit();toast('Your profiles and settings were removed');sheet();}
-    else if(dv==='retry')S.send({type:'retry'});else if(dv==='bt')S.send({type:'openBluetooth'});
+    else if(dv==='retry')S.send({type:'retry'});else if(dv==='bt')S.send({type:'openBluetooth'});else if(dv==='submit')S.send({type:'openSubmit'});
+    else if(dv==='check')S.checkUpdate();else if(dv==='install')S.installUpdate();
+    else if(dv==='updates')S.setCheckUpdates(S.settings.checkUpdates===false);
+    else if(dv==='tray')S.setTray(!S.settings.tray);
+    else if(dv==='startup')S.setStartup(S.settings.startup!=='on');
     return;}
   if(t.closest('#deviceBtn')){toggleSheet($('sheet').hidden);return;}
   if(!$('sheet').hidden&&!t.closest('#sheet')){ui.wpick=null;toggleSheet(false);}
@@ -529,14 +699,14 @@ document.addEventListener('click',async e=>{
   if(lc){const p=S.find(lc.dataset.lkey);
     if(ui.choosing!==null){const i=ui.choosing;ui.choosing=null;toggleLibrary(false);assign(i,p.key);return;}
     if(ui.mode==='edit'){toggleLibrary(false);load(p.key);return;}
-    if(!S.linked()){toast('The speaker is not connected',{label:'Reconnect',run:()=>S.send({type:'retry'})});return;}
+    if(!S.linked()){notLinked();return;}
     play(p);return;}
   const k=t.closest('[data-key]');
   if(k){k.classList.add('down');setTimeout(()=>k.classList.remove('down'),120);
     const p=S.find(k.dataset.key);
     if(ui.choosing!==null){const i=ui.choosing;ui.choosing=null;render();assign(i,p.key);return;}
     if(ui.mode==='edit'){load(p.key);return;}
-    if(!S.linked()){toast('The speaker is not connected',{label:'Reconnect',run:()=>S.send({type:'retry'})});return;}
+    if(!S.linked()){notLinked();return;}
     play(p);return;}
   const d=t.closest('[data-do]')?.dataset.do;if(!d)return;
   const p=editing();
@@ -554,7 +724,7 @@ document.addEventListener('click',async e=>{
 $('pname').addEventListener('change',e=>{const p=editing();if(p&&!p.factory)S.rename(p.key,e.target.value);});
 $('pname').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Escape')e.target.blur();});
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}}
+  if(e.key==='Escape'){if(rk.why==='manual'&&S.linked()){closeRack();return;}if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}}
   const uk=e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&e.target.closest?.('.pkey.user');
   if(uk){e.preventDefault();const key=uk.dataset.key,i=S.custom().findIndex(p=>p.key===key);S.move(key,i+(e.key==='ArrowRight'?1:-1));
     $('keys').querySelector(`[data-key="${key}"]`)?.focus();return;}
@@ -660,8 +830,10 @@ addEventListener('resize',()=>{if(ui.mode==='listen')conduits();const row=docume
 // Re-measure once the speaker and modules have settled after a mode change.
 $('rig').addEventListener('animationend',e=>{if(e.target.classList.contains('spkwrap'))conduits();});
 render();
+S.listSpeakers();   // two supported speakers and no choice yet: the Speakers page asks once
 // #edit opens the editor on the first saved profile, #device the sheet (reviews and screenshots).
-if(location.hash==='#device')toggleSheet(true);
+// #settings opens SETTINGS once the launch has settled (reviews and screenshots).
+if(location.hash==='#settings'||location.hash==='#device'){const off=S.subscribe(()=>{if(S.settled&&!$('app').classList.contains('booting')){off();setTimeout(()=>toggleSheet(true),400);}});}
 if(location.hash==='#edit'){const go=()=>{const k=S.custom()[0]?.key;if(k){ui.mode='edit';ui.edit=k;$('app').classList.add('editing');render();}};
   if(S.ready())go();else{const off=S.subscribe(()=>{if(S.ready()){off();go();}});}}
 })();

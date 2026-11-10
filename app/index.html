@@ -20,9 +20,9 @@
     <circle cx="50" cy="50" r="2.3" fill="#161617"/>
   </symbol>
 </defs></svg>
-<div class="app" id="app">
+<div class="app booting" id="app">
   <header class="top">
-    <div class="plate-name"><span class="model">XSound Plus 2</span></div>
+    <div class="plate-name"><button class="mech back" id="backBtn" title="All speakers">‹ Speakers</button><span class="model" id="modelBtn">Tribit Connect</span></div>
     <div class="mini-speaker" id="mini" aria-hidden="true"></div>
     <div class="instruments" id="instruments"></div>
     <button class="mech" id="deviceBtn" aria-expanded="false">Settings</button>
@@ -34,6 +34,20 @@
       <div class="units" id="units" role="group" aria-label="EQ button lights"></div>
       <div class="spkwrap"><div class="spk" id="spk"></div><div class="offline-card" id="offline" role="status" hidden></div></div>
       <svg class="conduits" id="conduits" aria-hidden="true"></svg>
+    </div>
+  </section>
+
+  <!-- Speakers: laid out like the home page. The stage shows the speaker selected; the bank below
+       is a SPEAKERS selector (A, B, C… as on an amp), one latching key per paired Tribit speaker.
+       Shown only when the app cannot carry on by itself. -->
+  <section class="rack" id="rack" aria-label="Speakers" hidden>
+    <div class="pick" id="pick">
+      <div class="pick-art" id="pickart"></div>
+      <div class="pick-info" id="pickinfo"></div>
+    </div>
+    <div class="bank spk-bank">
+      <span class="legend">SPEAKERS</span>
+      <div class="spk-keys" id="spkkeys" role="radiogroup" aria-label="Paired speakers"></div>
     </div>
   </section>
 

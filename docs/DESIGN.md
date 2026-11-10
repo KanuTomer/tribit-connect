@@ -44,7 +44,7 @@ Owner taste, in order of weight:
 
 ```
 Title bar (58px, = window caption, app-region:drag)
-  model name · [mini speaker, edit mode only] · battery needle meter · link bulb + word · SETTINGS · min/max/close
+  ‹ SPEAKERS (back to the Speakers page; on a speaker's page only) · model name · [mini speaker, edit mode only] · battery needle meter · link bulb + word · SETTINGS · min/max/close
 Stage (listening)                       | Surface (editing)
   three assignment modules (one per     |   name input · single state lamp (SAVED|DRAFT|FACTORY)
   EQ-button light) wired by conduits    |   fader plate: LCD display in band columns, 9 channels,
@@ -53,8 +53,59 @@ Stage (listening)                       | Surface (editing)
 Program bank (168px, charcoal, always visible)
   PROGRAM legend · FACTORY 01–06 · YOURS (first six profiles) + "+ new" (editor only) + "All N" (Library) · LCD (curve + spectrum; folds away in the editor) · EDIT/DONE
 Library drawer (slides up from behind the bank over row 2): ▾ tab · YOURS · count · search; crates ON THE BANK (first six) and LIBRARY, of records
-Settings sheet (overlay, right, 368px): Speaker · Windows · Appearance · Reconnect/Bluetooth · note
+Settings sheet (overlay, right, 368px; SETTINGS). One key; what it holds follows the page:
+  on a speaker's page: the speaker's name · firmware (and why there is no link, only then) · Try again (busy
+  only) · Beeps · Auto shutdown · WIDGET (that speaker's six buttons, Let the phone app connect) · note
+  on the Speakers page: APPEARANCE · WINDOW (Close to tray, Start with Windows) · UPDATES (version,
+  Check for updates, Check now / Update to x.y.z) ·
+  HELP (Diagnostic log, Remove my data, Help add a speaker)
+Speakers page (laid out like the home page): title bar keeps only "Tribit Connect" + window buttons ·
+  stage: the selected speaker drawn large (XSound Plus 2 only; other models get their name, never a
+  guessed shape) · exception word · note · one key (Open / Try again / Bluetooth settings / Help add it)
+  bank: SPEAKERS legend · SUPPORTED and NOT SUPPORTED YET groups of latching keys lettered A, B, C… as on
+  an amp's speaker selector (lamp = link) · dashed "+ pair" key (Bluetooth settings); scrolls past the width
 ```
+
+Rejected before this: a "hardware rack" (a studio rack is not the retro-amp world, and it read as plain
+boxes), then a Marantz-style tuning dial (crowded past four speakers, fake graduations, a 200px strip in an
+empty page). The title bar hides the battery and link here: they belong to one speaker, and on this page
+none is in use. SETTINGS stays: the app's own settings (updates above all) do not depend on a speaker.
+
+**Speaker vs app settings: by page, with one SETTINGS key.** The Speakers page is the app's home, so its
+SETTINGS holds the app's own settings; a speaker's page holds that speaker's, including its widget (the six
+buttons and "Let the phone app connect" belong to the speaker, as the widget shows one speaker). Nothing
+appears in both. Rejected (0.7.0): two sheets on one screen, one from the speaker's name and one from SETTINGS,
+with a third set of keys on the Speakers page; the owner found it odd and not the split meant. The widget's
+settings page holds only the speaker's settings (prompts, auto shutdown, release, speakers); the diagnostic
+log is the app's and lives only on the Speakers page.
+
+**Booting.** Until the host says the first connect attempt has settled (`speaker.settled`, capped at 4 s), only
+the title bar ("Tribit Connect") shows. The launch decision is then made under that cover with no grace
+period: linked → the instrument; not linked → the Speakers page at once. The instrument never flashes first.
+
+**No "Reconnect".** The app never reconnects Bluetooth; it opens the speaker's controls over a link Windows
+already has. So a missing link says why (`speaker.reason`, `Model.dropReason`): **off** ("Off or out of range",
+Bluetooth settings), **busy** ("Controls busy", Try again: another controller such as the phone app holds it),
+**bluetooth** (the radio), **released** (the app let go on purpose; no key). Try again appears only for busy.
+
+Speakers page rules (owner's choices):
+
+- **Shown only when needed** (`Model.rackReason`): the speaker gone for 3 s or more (`RACK_GRACE`; shorter
+  drops and the host's own recheck keep the instrument), or two supported speakers paired and none chosen
+  yet (asked once; `chosen` in state.json). ‹ Speakers in the title bar opens it any time; Esc
+  or Open on the speaker in use closes it. Once open for a missing speaker it stays until that speaker links. A hidden window never shows it, so the idle release
+  ("Let the phone app connect", sleep) does not throw the user out.
+- **Kick back on disconnect, return by itself.** The editor stays as it was underneath (Audition stops with
+  the link; drafts are already saved), so the speaker coming back returns to the same profile and draft.
+- **Tribit speakers only.** Unsupported models say "Not supported yet" and their key opens the
+  add-your-speaker site with `?model=`. Two of one model go by their Windows names.
+- Pressing a selector key (or the arrow keys) only selects; the key on the stage acts on it.
+- The key order is fixed when the page opens (in use, supported, others) and never reshuffles while up.
+- **Per-speaker widget.** Each speaker keeps its own six widget buttons (`library.widgetBy`, by address;
+  the host shows `widgetSlotsBy[address]`) and its own "Let the phone app connect" (`speakers[address]` in
+  state.json). A speaker without its own starts from the buttons that existed before.
+- **Remembered speakers.** The host keeps what each speaker last reported under `speakers` in state.json (by
+  address); switching shows that speaker's own last-known values, and an off speaker says when it was last seen.
 
 Key concepts and their separation (never blur these):
 
@@ -176,7 +227,8 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
   (meter, link, SETTINGS, window buttons) never shifts. Link word is `Linked` throughout writes
   (writes show on the key/module being written; the bulb flashing "Writing" was rejected).
 - **Offline**: `.app.offline` greys speaker/lamps/meter/keys, conduits fade, offline card (engraved title,
-  plain cause, Reconnect / Bluetooth) rises over the speaker. Editing still works (profiles are local).
+  plain cause from `Model.dropReason`, Try again only for busy controls, else Bluetooth settings) rises over
+  the speaker during the grace period; the Speakers page takes over after it.
 
 ## 5. State model (frontend)
 
@@ -228,11 +280,15 @@ card on every update and blanks images while reloading, so: one update per click
 refresh sends nothing, no images inside buttons, selected button = bold Accent text on the host's neutral
 surface (colour washes rejected). Six buttons are data-driven (`eq.slot.N`, data `sN.label/...`); saved
 curves render orange via `custom_artwork()`. The curve image blinking on change is an accepted board limit.
+Several speakers: the Settings page's "Speakers" row opens a Speakers page (up to three paired supported
+speakers, `speaker.choose.N`, then Device details and Pair a speaker); Home shows **Switch** next to the status
+when the speaker has no link and another is paired, and **Try again** only for busy controls (`can_try_again`).
+The template never depends on what is paired (rows hide); `AllowMultiple` stays false: one controller link.
 
 ## 9. Verification workflow (mandatory for visual changes)
 
 1. Iterate in the browser mock: open `app/index.html` (file:// works). Hash/query helpers: `#edit`,
-   `#device`, `?offline`, `?music` (fake spectrum), `?many` (full YOURS row), `?debug` or backtick for the
+   `#settings` (opens SETTINGS once launch settles; `?offline#settings` shows the app's), `?offline`, `?speakers=two|six|none`, `?uptodate`, `?music` (fake spectrum), `?many` (full YOURS row), `?debug` or backtick for the
    mock strip.
 2. Screenshot with headless Edge and **inspect zoomed crops of the exact element changed**, in both themes:
    `msedge --headless=new --user-data-dir=<tmp> --window-size=1280,800 --hide-scrollbars
@@ -265,6 +321,26 @@ curves render orange via `custom_artwork()`. The curve image blinking on change 
   package LocalState once. MSIX uninstall cannot prompt; the README says so.
 
 ## 11. Distribution
+
+**Updates** (`src/updates.hpp`, ported from Bandwave): once a day while "Check for updates" is on (and on
+Check now) the app reads this repository's latest GitHub release. It offers a version only if it is newer and
+carries `TribitConnect-Setup-<x.y.z>.exe` and its `.sha256`; the download must match the hash, have an intact
+signature and be signed by CN=TribitConnect.Local (thumbprint in `updates.hpp`). It then runs setup `/update`:
+only the progress window, the package updates in place (data kept), and the app reopens. `package.ps1` writes
+the versioned setup and its `.sha256` to `out/`; publishing the release is a separate, owner-approved step.
+Installs from 0.4.0 and earlier have no updater and need one manual install.
+
+**Tray and startup** (0.7.3, ported from Bandwave). Close to tray (`state.json` `tray`, default off): the
+window's WM_CLOSE hides it instead (`WebViewHost::on_close`), the WebView is set invisible so the page sees
+`document.hidden`, the spectrum stops and `interest()` counts a hidden window as closed, so the speaker is
+released as after a real close. The icon lives on a hidden `TribitConnect.Tray` window (message-only windows
+miss `TaskbarCreated` and can't own the menu); it shows while the window is open with the switch on, and
+always while the window is hidden. Click opens; the menu has Open and Quit. Start with Windows is the
+package's `windows.startupTask` (`TribitConnectStartup`, off by default). Windows owns its state, so the host
+reads or requests it off the UI thread and reports `settings.startup`: `on`, `off`, `user-off` (turned off in
+Settings > Apps > Startup, so only Windows can turn it back on), `policy-on`/`policy-off`, or `unavailable`
+(an unpackaged build). Launched by the task (`AppInstance::GetActivatedEventArgs` is `StartupTask`), the app
+starts in the tray.
 
 `TribitConnect-Setup.exe` (`src/setup.cpp`, built by `scripts/package.ps1` after the MSIX it embeds as
 RCDATA 101/102): TaskDialog progress → if the cert is not in LocalMachine\TrustedPeople, relaunch self
