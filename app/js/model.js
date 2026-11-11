@@ -30,7 +30,23 @@ const flat=()=>BANDS.freqs.map(()=>0);
 let counter=0;
 const newKey=()=>'p'+Date.now().toString(36)+(counter++).toString(36);
 
-function emptyLibrary(){return{profiles:[],links:{custom:null,slots:[null,null,null]}};}
+function emptyLibrary(){return{profiles:[],order:FACTORY.map(p=>p.key),links:{custom:null,slots:[null,null,null]}};}
+// ---- one list of programs ------------------------------------------------------------------------
+// Everything that can be played is a program, in one order the user arranges: their own profiles and
+// the six factory presets alike (library.order holds the keys). The first BANK are the program bar's
+// keys and the first WIDGET the widget's and the tray menu's buttons; nothing else decides either.
+// The order is repaired on the way out, so a key missing from it (a new profile, an old library)
+// still has a place: own profiles before the factory presets, which most people do not use.
+function orderOf(library){
+  const own=library.profiles.map(p=>p.key),all=new Set([...own,...FACTORY.map(p=>p.key)]),seen=new Set(),out=[];
+  for(const k of Array.isArray(library.order)?library.order:[])if(all.has(k)&&!seen.has(k)){seen.add(k);out.push(k);}
+  const firstFactory=out.findIndex(k=>/^f\d+$/.test(k)),missing=own.filter(k=>!seen.has(k));
+  if(missing.length)out.splice(firstFactory<0?out.length:firstFactory,0,...missing);
+  for(const f of FACTORY)if(!seen.has(f.key))out.push(f.key);
+  return out;
+}
+const programs=library=>orderOf(library).map(k=>findProfile(library,k));
+const numberOf=(library,key)=>{const i=orderOf(library).indexOf(key);return i<0?null:i+1;};
 
 function findProfile(library,key){
   return FACTORY.find(p=>p.key===key)||library.profiles.find(p=>p.key===key)||null;
@@ -52,14 +68,16 @@ function uniqueName(library,base){
 }
 // A copy is named after the original, never after another copy ("Desk copy copy" was the bug).
 const copyBase=name=>`${name.replace(/ copy( \d+)?$/,'')} copy`;
-// New profiles go right after the one they were made from (or `after`), otherwise at the end.
+// New profiles go right after the one they were made from (or `after`), otherwise at the end of the
+// user's own profiles, ahead of the factory presets.
 function createProfile(library,{from=null,name,after=null}={}){
   const source=from?findProfile(library,from):null;
   const profile={key:newKey(),name:uniqueName(library,name||(source?(source.factory?`My ${source.name}`:copyBase(source.name)):'Untitled')),
     bands:source?bandsOf(source):flat(),rev:1,basedOn:source?source.key:null,approx:!!(source&&(source.factory||source.approx))};
-  const list=library.profiles.slice(),at=list.findIndex(p=>p.key===(after||(source&&!source.factory?source.key:null)));
-  list.splice(at<0?list.length:at+1,0,profile);
-  return {library:{...library,profiles:list},key:profile.key};
+  const order=orderOf(library),at=order.indexOf(after||(source?source.key:null));
+  const next={...library,profiles:[...library.profiles,profile],order};
+  if(at>=0){order.splice(at+1,0,profile.key);return {library:next,key:profile.key};}
+  return {library:{...next,order:orderOf({...next,order})},key:profile.key};
 }
 function updateProfile(library,key,change){
   return {...library,profiles:library.profiles.map(p=>{
@@ -71,16 +89,13 @@ function updateProfile(library,key,change){
 }
 const setBand=(library,key,index,value)=>{const p=findProfile(library,key);if(!p||p.factory)return library;
   const bands=p.bands.slice();bands[index]=clampBand(value);return updateProfile(library,key,{bands});};
-// The program bank holds the first BANK saved profiles; the library holds them all, in one order
-// the user arranges by dragging.
-const BANK=6;
-const bankProfiles=library=>library.profiles.slice(0,BANK);
-// Saved profiles keep the order the user arranges; their numbers (07, 08, …) follow it.
+const BANK=12,WIDGET=6;
+const bankProfiles=library=>programs(library).slice(0,BANK);
+// Programs keep the order the user arranges; their numbers (01, 02, …) follow it.
 function moveProfile(library,key,to){
-  const from=library.profiles.findIndex(p=>p.key===key);if(from<0)return library;
-  const list=library.profiles.slice(),[p]=list.splice(from,1);
-  to=Math.max(0,Math.min(list.length,to));if(to===from)return library;
-  list.splice(to,0,p);return {...library,profiles:list};
+  const order=orderOf(library),from=order.indexOf(key);if(from<0)return library;
+  order.splice(from,1);to=Math.max(0,Math.min(order.length,to));if(to===from)return library;
+  order.splice(to,0,key);return {...library,order};
 }
 // An unsaved draft is kept with its profile, so it survives switching profiles and restarts.
 // A draft equal to the saved curve is no draft. Saving the bands clears it.
@@ -88,17 +103,18 @@ const setDraft=(library,key,bands)=>{const p=findProfile(library,key);if(!p||p.f
   return updateProfile(library,key,{draft:bands&&!sameBands(bands,p.bands)?bands.map(clampBand):undefined});};
 const resetProfile=(library,key)=>updateProfile(library,key,{bands:flat()});
 const renameProfile=(library,key,name)=>{name=String(name).trim().slice(0,32);return name?updateProfile(library,key,{name}):library;};
-// Deleting keeps the record so the UI can offer undo; links to it are cleared.
+// Deleting keeps the record so the UI can offer undo; links to it are cleared. Factory presets are
+// fixed in the speaker and cannot be deleted (they can be moved out of the way).
 function deleteProfile(library,key){
   const index=library.profiles.findIndex(p=>p.key===key);if(index<0)return {library,undo:null};
-  const removed=library.profiles[index];
+  const removed=library.profiles[index],order=orderOf(library);
   const links={custom:library.links.custom?.key===key?null:library.links.custom,slots:library.links.slots.map(s=>s?.key===key?null:s)};
-  return {library:{...library,profiles:library.profiles.filter(p=>p.key!==key),links},undo:{profile:removed,index,links:library.links}};
+  return {library:{...library,profiles:library.profiles.filter(p=>p.key!==key),order:order.filter(k=>k!==key),links},undo:{profile:removed,index,links:library.links,order}};
 }
 function undoDelete(library,undo){
   if(!undo)return library;
   const profiles=library.profiles.slice();profiles.splice(undo.index,0,undo.profile);
-  return {...library,profiles,links:undo.links};
+  return {...library,profiles,links:undo.links,order:undo.order||library.order};
 }
 
 // ---- Speaker status ----------------------------------------------------------------------
@@ -188,28 +204,10 @@ function sampleCurve(profile,count=160,lo=60,hi=16000){
     return .5*(2*p1+(-p0+p2)*u+(2*p0-5*p1+4*p2-p3)*u*u+(-p0+3*p1-3*p2+p3)*u*u*u);});
 }
 
-// The widget's six buttons: factory presets in the widget's own order unless replaced. A button
-// whose profile was deleted falls back to its preset. The host gets them resolved (factory
-// buttons keep the widget's own preset names, saved ones carry their name and curve).
-const WIDGET_DEFAULT=['f0','f1','f3','f4','f2','f5'];
-// The widget's six buttons belong to a speaker (`address`): each paired speaker keeps its own, under
-// library.widgetBy. A speaker without its own starts from library.widget (the buttons from before
-// 0.7.1, or the defaults).
-function widgetKeys(library,address){
-  const own=address&&library.widgetBy?.[address],w=own||library.widget||[];
-  return WIDGET_DEFAULT.map((d,i)=>w[i]&&findProfile(library,w[i])?w[i]:d);
-}
-function widgetSlots(library,address){
-  return widgetKeys(library,address).map(key=>{const p=findProfile(library,key);return p.factory?{preset:p.id}:{preset:CUSTOM,name:p.name,bands:p.bands.slice()};});
-}
-function setWidget(library,index,key,address){
-  const keys=widgetKeys(library,address);keys[index]=key;
-  return address?{...library,widgetBy:{...library.widgetBy,[address]:keys}}:{...library,widget:keys};
-}
-// Every speaker's buttons, resolved, for the host (which shows the speaker in use).
-function widgetSlotsBy(library){
-  return Object.fromEntries(Object.keys(library.widgetBy||{}).map(a=>[a,widgetSlots(library,a)]));
-}
+// The widget's six buttons, and the tray menu's, are the first six programs. The host gets them
+// resolved (factory buttons keep the widget's own preset names, own profiles carry name and curve).
+const widgetKeys=library=>orderOf(library).slice(0,WIDGET);
+const widgetSlots=library=>widgetKeys(library).map(key=>{const p=findProfile(library,key);return p.factory?{preset:p.id}:{preset:CUSTOM,name:p.name,bands:p.bands.slice()};});
 
 // ---- the Speakers page --------------------------------------------------------------------------
 // Paired Tribit speakers in rack order: the remembered one, then others the app supports, then the rest.
@@ -243,8 +241,41 @@ function dropReason(reason,error){
   }
 }
 
-const Model={rackOrder,rackReason,dropReason,RACK_GRACE,BANDS,FACTORY,CUSTOM,emptyLibrary,findProfile,matchProfile,bandsOf,createProfile,updateProfile,setBand,resetProfile,renameProfile,
-  deleteProfile,undoDelete,activeKey,profileStatus,slotView,applyCommand,assignCommand,linkApplied,linkAssigned,sampleCurve,sameBands,clampBand,setDraft,moveProfile,BANK,bankProfiles,NAME_MAX,
-  WIDGET_DEFAULT,widgetKeys,widgetSlots,widgetSlotsBy,setWidget};
+// ---- loading ------------------------------------------------------------------------------------
+// A library read from disk, made safe to use: profiles.json may have been edited by hand, cut short,
+// or written by an older version. Anything that is not a usable profile is dropped; everything the
+// views index into (bands, links.slots, widget keys) has the shape they expect. null when there is
+// nothing to load. Unknown fields are kept, so a newer version's data survives an older one.
+function normalizeLibrary(raw){
+  if(!raw||typeof raw!=='object'||Array.isArray(raw))return null;
+  const N=BANDS.freqs.length,bandsOk=b=>Array.isArray(b)&&b.length===N&&b.every(v=>Number.isFinite(v));
+  const seen=new Set(),profiles=[];
+  for(const p of Array.isArray(raw.profiles)?raw.profiles:[]){
+    if(!p||typeof p!=='object'||typeof p.key!=='string'||!p.key||/^f\d+$/.test(p.key)||p.key==='custom'||seen.has(p.key)||!bandsOk(p.bands))continue;
+    seen.add(p.key);
+    const {pinned,...rest}=p;   // pinning was retired for the bank
+    const next={...rest,name:(typeof p.name==='string'&&p.name.trim()?p.name.trim():'Untitled').slice(0,NAME_MAX),bands:p.bands.map(clampBand),rev:Number.isInteger(p.rev)&&p.rev>0?p.rev:1};
+    delete next.draft;   // the editor is live from 0.8.0: there are no unsaved drafts to keep
+    profiles.push(next);
+  }
+  const link=l=>l&&typeof l==='object'&&seen.has(l.key)&&bandsOk(l.bands)?{key:l.key,bands:l.bands.map(clampBand)}:null;
+  const slots=Array.isArray(raw.links?.slots)?raw.links.slots:[];
+  const out={...raw,profiles,links:{custom:link(raw.links?.custom),slots:[0,1,2].map(i=>link(slots[i]))}};
+  // Before 0.8.0 each speaker had its own widget buttons; the widget now shows the first six programs.
+  delete out.widget;delete out.widgetBy;delete out.widgetSlots;delete out.widgetSlotsBy;
+  out.order=orderOf(out);
+  return out;
+}
+// "11:56 AM" today, "12 Nov, 11:56 AM" on any other day: a time alone would read as today.
+function whenSeen(ms,now=Date.now(),locale){
+  if(!ms)return '';
+  const d=new Date(ms),n=new Date(now),time=d.toLocaleTimeString(locale||[],{hour:'numeric',minute:'2-digit'});
+  if(d.getFullYear()===n.getFullYear()&&d.getMonth()===n.getMonth()&&d.getDate()===n.getDate())return time;
+  return `${d.toLocaleDateString(locale||[],{day:'numeric',month:'short',...(d.getFullYear()===n.getFullYear()?{}:{year:'numeric'})})}, ${time}`;
+}
+
+const Model={normalizeLibrary,whenSeen,rackOrder,rackReason,dropReason,RACK_GRACE,BANDS,FACTORY,CUSTOM,emptyLibrary,findProfile,matchProfile,bandsOf,createProfile,updateProfile,setBand,resetProfile,renameProfile,
+  deleteProfile,undoDelete,activeKey,profileStatus,slotView,applyCommand,assignCommand,linkApplied,linkAssigned,sampleCurve,sameBands,clampBand,setDraft,moveProfile,BANK,WIDGET,bankProfiles,NAME_MAX,
+  programs,orderOf,numberOf,widgetKeys,widgetSlots};
 if(typeof module!=='undefined'&&module.exports)module.exports=Model;else root.Model=Model;
 })(typeof globalThis!=='undefined'?globalThis:this);

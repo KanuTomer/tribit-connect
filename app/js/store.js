@@ -5,7 +5,7 @@
 const M=Model,subs=new Set();
 let speaker=null,library=null,settings={},speakers=null,bootOver=false;
 setTimeout(()=>{bootOver=true;emit();},4000);
-const emit=()=>subs.forEach(fn=>fn());
+const emit=()=>subs.forEach(fn=>{try{fn();}catch(e){Bridge.report(e);}});
 // The app starts with an empty library; the browser mock gets a few profiles to work with.
 function seed(){
   let lib=M.emptyLibrary();
@@ -19,11 +19,10 @@ function seed(){
 }
 // The host also reads the widget's buttons from here, resolved, so it never needs the model.
 let soon=0;
-// The speaker in use: its widget buttons are the ones shown and edited.
-const here=()=>speaker?.address||speakers?.address||'';
+// widgetSlots: the first six programs, resolved, for the widget and the tray menu.
 function persist(){clearTimeout(soon);soon=0;
-  Bridge.send({type:'saveLibrary',library:{...library,widgetSlots:M.widgetSlots(library,here()),widgetSlotsBy:M.widgetSlotsBy(library)}});}
-// Drafts change with every fader step; they are written once the hand stops.
+  Bridge.send({type:'saveLibrary',library:{...library,widgetSlots:M.widgetSlots(library)}});}
+// Curves change with every fader step; they are written once the hand stops.
 function persistSoon(){clearTimeout(soon);soon=setTimeout(persist,500);}
 addEventListener('pagehide',()=>{if(soon)persist();});
 Bridge.on(m=>{
@@ -31,8 +30,16 @@ Bridge.on(m=>{
   if(m.type==='speakers'){speakers={list:m.list||[],address:m.address||'',chosen:!!m.chosen};emit();return;}
   if(m.type!=='state')return;
   speaker=m.speaker;settings=m.settings||settings;
-  if(!library){library=m.library||seed();if(!m.library)persist();
-    library={...library,profiles:library.profiles.map(({pinned,...p})=>p)};}   // pinning was retired for the five-slot bank
+  // The library comes once, with the host's reply to `ready` (the only state message that carries the
+  // key). null means there is no file yet: start a new one. With libraryError the file exists but
+  // could not be read: the host has set it aside (profiles.bad-…), and nothing is written here until
+  // the user makes a change, so a file that is only locked for a moment is never replaced.
+  if(!library&&'library' in m){
+    const fresh=!m.library&&!m.libraryError;
+    library=M.normalizeLibrary(m.library)||(m.libraryError?M.emptyLibrary():seed());
+    Core.libraryError=!!m.libraryError;
+    if(fresh)persist();
+  }
   emit();
 });
 // Audition writes: unsaved curves go to the speaker one at a time and only the newest waiting
@@ -48,6 +55,9 @@ async function pump(){
   }
   aud.busy=false;emit();
 }
+// One speaker write at a time (apply, assign); a failure never blocks the ones behind it.
+let chain=Promise.resolve();
+const queue=job=>{const run=chain.then(job,job);chain=run.catch(()=>{});return run;};
 const Core={
   M,
   // Queue a raw apply ({preset} or {preset:FE,bands}) for audition or restore.
@@ -77,7 +87,9 @@ const Core={
   find:key=>key==='custom'?{key:'custom',name:'Custom',factory:false,bands:speaker?.bands||[0,0,0,0,0,0,0,0,0],foreign:true}:M.findProfile(library,key),
   factory:M.FACTORY,
   custom:()=>library.profiles,
-  number:key=>{const f=M.FACTORY.findIndex(p=>p.key===key);if(f>=0)return f+1;const c=library.profiles.findIndex(p=>p.key===key);return c>=0?7+c:null;},
+  // Every program in the user's order: the first twelve are the program bar, the first six the widget.
+  programs:()=>M.programs(library),
+  number:key=>M.numberOf(library,key),
   active:()=>M.activeKey(speaker,library),
   slots:()=>[0,1,2].map(i=>M.slotView(speaker,library,i)),
   // The light whose content is playing now (the physical light follows the button presses).
@@ -87,30 +99,39 @@ const Core={
   curve:(p,n)=>M.sampleCurve(p,n),
   bandsOf:p=>M.bandsOf(p),
   busy:null,
-  async apply(p,bands){
+  libraryError:false,
+  // Speaker writes run one at a time, in the order asked. An assign builds its three lights from what
+  // the speaker reports, so it must see the result of the write before it, not the state before that.
+  apply(p,bands){return queue(async()=>{
     const target=bands?{...p,bands}:p;
-    while(aud.busy)await new Promise(r=>setTimeout(r,30)); // never overtaken by an audition write
+    for(let n=0;aud.busy&&n<600;n++)await new Promise(r=>setTimeout(r,30)); // never overtaken by an audition write
     Core.busy='apply';emit();
     const r=await Bridge.request(M.applyCommand(target));
     Core.busy=null;if(r.ok&&!target.factory){library=M.linkApplied(library,target);persist();}
     emit();return r;
-  },
+  });},
   // Writes all three lights, replacing one; lights we cannot name keep the speaker's own bytes.
-  async assign(light,key){
+  assign(light,key){return queue(async()=>{
     const p=M.findProfile(library,key);if(!p)return {ok:false,error:'Unknown profile.'};
+    if(!Core.linked())return {ok:false,error:'The speaker is not connected.'};
+    // The other two lights are written back as the speaker reported them; one not read yet cannot be.
+    const hw=speaker.buttons||[];
+    if([0,1,2].some(i=>i!==light&&(!hw[i]||hw[i].preset==null||hw[i].preset<0||(hw[i].preset===M.CUSTOM&&!Array.isArray(hw[i].bands)))))
+      return {ok:false,error:'The lights have not been read yet. Try again in a moment.'};
     const slots=[0,1,2].map(i=>{
       if(i===light)return p.factory?{preset:p.id}:{preset:M.CUSTOM,bands:p.bands.slice()};
-      const hw=speaker.buttons[i];return hw.preset===M.CUSTOM?{preset:M.CUSTOM,bands:hw.bands.slice()}:{preset:hw.preset};
+      return hw[i].preset===M.CUSTOM?{preset:M.CUSTOM,bands:hw[i].bands.slice()}:{preset:hw[i].preset};
     });
     Core.busy='assign:'+light;emit();
     const r=await Bridge.request({type:'assign',slots});
     Core.busy=null;
-    if(r.ok){const keys=Core.slots().map(s=>s.key);keys[light]=key;
-      library={...library,links:{...library.links,slots:library.links.slots.map((l,i)=>i===light?(p.factory?null:{key,bands:p.bands.slice()}):l)}};persist();}
+    if(r.ok){library={...library,links:{...library.links,slots:library.links.slots.map((l,i)=>i===light?(p.factory?null:{key,bands:p.bands.slice()}):l)}};persist();}
     emit();return r;
-  },
+  });},
   save(key,bands){library=M.updateProfile(library,key,{bands,draft:undefined});persist();emit();},
-  setDraft(key,bands){library=M.setDraft(library,key,bands);persistSoon();},
+  // The editor is live: a fader move is the profile's new curve at once. Views redraw what they show
+  // themselves (no emit here: this runs on every step of a drag).
+  setBands(key,bands){library=M.updateProfile(library,key,{bands});persistSoon();},
   rename(key,name){library=M.renameProfile(library,key,name);persist();emit();},
   create(opts){const r=M.createProfile(library,opts);library=r.library;persist();emit();return r.key;},
   remove(key){const r=M.deleteProfile(library,key);library=r.library;persist();emit();return r.undo;},
@@ -118,8 +139,6 @@ const Core={
   move(key,to){const next=M.moveProfile(library,key,to);if(next===library)return;library=next;persist();emit();},
   // Settings > Remove my data: the page starts over with an empty library; the host deletes the files.
   removeData(){library=M.emptyLibrary();try{localStorage.clear();}catch{}Bridge.send({type:'removeData'});emit();},
-  widget:()=>M.widgetKeys(library,here()),
-  setWidget(i,key){library=M.setWidget(library,i,key,here());persist();emit();},
   setPrompt:(i,v)=>Bridge.request({type:'setPrompt',index:i,value:v}),
   setAutoShutdown:v=>Bridge.request({type:'setAutoShutdown',value:v}),
   send:m=>Bridge.send(m),
@@ -133,12 +152,16 @@ Core.reduce=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Mode changes: what is shown steps back for a moment, the change happens, and the new parts
 // rise into place (styles under .leaving / .arriving). Timers, not frames, drive it, so it can
 // never stall in a hidden window; with reduced motion the change is instant.
-let shift=0;
+// A change is never dropped: if another transition starts while one is still stepping back, the
+// waiting change happens first (it used to be cancelled, which could leave two pages half shown).
+let shift=0,waiting=null;
 Core.transition=fn=>{
   const app=document.getElementById('app');
-  if(Core.reduce()||document.hidden){fn();return;}
-  clearTimeout(shift);app.classList.remove('arriving');app.classList.add('leaving');
-  shift=setTimeout(()=>{app.classList.remove('leaving');fn();app.classList.add('arriving');
+  clearTimeout(shift);
+  if(waiting){const w=waiting;waiting=null;app.classList.remove('leaving');w();}
+  if(Core.reduce()||document.hidden){app.classList.remove('leaving','arriving');fn();return;}
+  app.classList.remove('arriving');app.classList.add('leaving');waiting=fn;
+  shift=setTimeout(()=>{waiting=null;app.classList.remove('leaving');fn();app.classList.add('arriving');
     shift=setTimeout(()=>app.classList.remove('arriving'),700);},280);   // long enough for the exits
 };
 Bridge.send({type:'ready'});

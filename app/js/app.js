@@ -7,8 +7,7 @@
 'use strict';
 const S=Store,M=S.M,B=M.BANDS,N=B.freqs.length,$=id=>document.getElementById(id),esc=S.esc;
 const region=i=>i<3?'var(--low)':i<6?'var(--mid)':'var(--high)';
-const ui={mode:'listen',edit:null,draft:null,choosing:null,hot:-1,toast:null,pending:null,wpick:null,lastPick:null,library:false,removing:false};
-const aud={on:false,before:null};   // audition: what the speaker played before it started
+const ui={mode:'listen',edit:null,opened:null,hold:false,choosing:null,hot:-1,toast:null,pending:new Set(),wpick:null,lastPick:null,library:false,removing:false,armed:null};
 
 // ---- curves by band position --------------------------------------------------------------------
 // The editor's display is laid out in band columns, so each band's point sits above its fader.
@@ -85,12 +84,10 @@ function drawBars(){
 // ---- what is shown ------------------------------------------------------------------------------
 const playing=()=>S.find(S.active());
 const editing=()=>ui.edit?S.find(ui.edit):null;
-const editBands=()=>{const p=editing();return p?(ui.draft||(p.factory?S.bandsOf(p):p.bands)):null;};
+const editBands=()=>{const p=editing();return p?(p.factory?S.bandsOf(p):p.bands):null;};
 const pad2=n=>n==null?'··':String(n).padStart(2,'0');
 const lightsOf=key=>S.slots().map((v,i)=>v.key===key?i:-1).filter(i=>i>=0);
 const nameOf=p=>!p?'—':p.foreign?'Custom curve':p.name;
-const hasDraft=p=>!p.factory&&(ui.mode==='edit'&&ui.edit===p.key?!!ui.draft:!!p.draft);
-const draftPlaying=()=>!!ui.draft&&S.speaker.preset===M.CUSTOM&&M.sameBands(S.speaker.bands,ui.draft);
 
 function instruments(){
   const s=S.speaker,v=Math.max(0,Math.min(100,s.battery??0)),known=S.linked()&&s.battery>=0;
@@ -112,8 +109,8 @@ function instruments(){
 }
 function speakerArt(){
   const s=S.speaker,state=s.status==='connecting'?'connecting':s.connected?'linked':'off',lit=S.lit();
-  if(!$('spk').firstChild){$('spk').innerHTML=Speaker.svg({light:lit,state,id:'big'});$('mini').innerHTML=Speaker.svg({light:lit,state,id:'mini',interactive:false});}
-  for(const el of [$('spk'),$('mini')])Speaker.set(el,{light:lit,state});
+  if(!$('spk').firstChild)$('spk').innerHTML=Speaker.svg({light:lit,state,id:'big'});
+  Speaker.set($('spk'),{light:lit,state});
 }
 // ---- the three assignment modules ---------------------------------------------------------------
 function units(){
@@ -150,11 +147,11 @@ function offlineCard(){
     setTimeout(()=>{el.classList.remove('closing');if(S.linked())el.hidden=true;},S.reduce()?0:220);}return;}
   el.classList.remove('closing');el.hidden=false;
   // Shown only for the moment before the Speakers page takes over (the grace period after a drop).
-  const seen=s.lastSeen?new Date(s.lastSeen).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'';
+  const seen=lastSeen(s.lastSeen);
   const r=M.dropReason(s.reason,s.error);
-  el.innerHTML=`<span class="engr"><span class="led ${connecting?'amber blink':'orange'}"></span>${connecting?'Connecting':esc(r.word)}</span>
+  morph(el,`<span class="engr"><span class="led ${connecting?'amber blink':'orange'}"></span>${connecting?'Connecting':esc(r.word)}</span>
     <p>${connecting?'Opening the speaker’s controls…':esc(r.hint)}${seen&&!connecting?`<br>Last seen ${seen}; the lights and programs show what was read then.`:''}</p>
-    ${connecting?'':reasonKeys(r)}`;
+    ${connecting?'':reasonKeys(r)}`);
 }
 // The keys a missing link can offer: Try again only for busy controls; Bluetooth settings otherwise.
 function reasonKeys(r,go=false){
@@ -163,18 +160,25 @@ function reasonKeys(r,go=false){
 }
 // The name on the title bar: the speaker in use (its Windows name when two of one model are
 // paired), or the app's own name while nothing is in use (booting, the Speakers page).
-function titleName(){
-  if($('app').classList.contains('booting')||rk.why)return 'Tribit Connect';
+function titleName(){return $('app').classList.contains('booting')||rk.why?'Tribit Connect':speakerName();}
+function speakerName(){
   const sp=S.speakers,d=sp?.list.find(x=>x.address===sp.address);if(!d)return 'XSound Plus 2';
   return sp.list.some(o=>o!==d&&o.model===d.model)?d.name:d.model;
 }
-const lastSeen=ms=>ms?new Date(ms).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
+// The title bar's key: ‹ Speakers on a speaker's page. On a Speakers page opened by hand, with the
+// speaker still linked, it is the way back: ‹ and that speaker's name (Esc does the same).
+function backKey(){
+  const back=rk.why==='manual'&&S.linked(),text=rk.why?`‹ ${speakerName()}`:'‹ Speakers',b=$('backBtn');
+  $('app').classList.toggle('returnable',back);
+  if(b.textContent!==text)b.textContent=text;   // no title: the app shows no tooltips
+}
+const lastSeen=ms=>M.whenSeen(ms);
 // ---- Speakers page ---------------------------------------------------------------------------------
 // The paired Tribit speakers, on a SPEAKERS selector with the one selected on the stage. It appears only when the app cannot carry on by itself
 // (M.rackReason: the speaker gone past the grace period, or two to choose from), or when the model
 // name is clicked. The editor stays as it was underneath, so a speaker coming back returns to it,
 // draft and all; Audition stops with the link (render), and the sheet and library close.
-const rk={why:null,downAt:0,timer:0,poll:0,launch:true};
+const rk={why:null,downAt:0,timer:0,poll:0,launch:true,switchAt:0,holdUntil:0},SWITCH_WAIT=6000,SHOW_HOLD=1200;
 function rackTick(){
   if(!S.ready())return;
   const s=S.speaker,linked=S.linked(),hidden=document.hidden,booting=!S.settled;
@@ -183,30 +187,50 @@ function rackTick(){
   const wasBooting=$('app').classList.contains('booting');
   if(linked||hidden)rk.downAt=0;else if(!rk.downAt)rk.downAt=Date.now();
   const downFor=rk.downAt?Date.now()-rk.downAt:0;
-  const why=M.rackReason({linked,status:s.status,hidden,downFor,list:S.speakers?.list,chosen:S.chosen,booting,launch:rk.launch});
+  // Shown again from the tray: the host starts connecting a moment after the window appears, so the
+  // decision waits briefly (under the cover) rather than taking the released link for a missing speaker.
+  const holding=Date.now()<rk.holdUntil;
+  const why=M.rackReason({linked,status:s.status,hidden,downFor,list:S.speakers?.list,chosen:S.chosen,booting:booting||holding,launch:rk.launch});
   // The launch decision is made once, as soon as the attempt settles (connecting waits for its end).
-  if(!booting&&s.status!=='connecting')rk.launch=false;
+  if(!booting&&!holding&&s.status!=='connecting')rk.launch=false;
   clearTimeout(rk.timer);
-  if(!why&&rk.downAt)rk.timer=setTimeout(rackTick,Math.max(50,M.RACK_GRACE-downFor+20));
+  if(holding)rk.timer=setTimeout(rackTick,Math.max(30,rk.holdUntil-Date.now()+20));
+  else if(!why&&rk.downAt)rk.timer=setTimeout(rackTick,Math.max(50,M.RACK_GRACE-downFor+20));
   // After a switch the page waits for the old link to drop and the new one to come up.
-  if(rk.why==='switch'){if(!linked)rk.dropped=true;else if(rk.dropped)closeRack();return;}
+  // A switch the host did not take up (the speaker was unpaired meanwhile, say) must not hold the page
+  // for good: after SWITCH_WAIT with the old link still up, it is an ordinary manually opened page.
+  if(rk.why==='switch'){if(!linked)rk.dropped=true;else if(rk.dropped){closeRack();return;}
+    else if(Date.now()-rk.switchAt>SWITCH_WAIT)rk.why='manual';
+    else{clearTimeout(rk.timer);rk.timer=setTimeout(rackTick,SWITCH_WAIT+50);}
+    if(rk.why==='switch')return;}
   if(why&&!rk.why)openRack(why,wasBooting);
   // A page opened for a missing speaker stays until it links (not merely until the rule goes quiet).
   else if(!why&&rk.why&&rk.why!=='manual'&&(rk.why!=='down'||linked))closeRack();
-  if(wasBooting&&!booting&&(s.status!=='connecting'||S.bootOver)){$('app').classList.remove('booting');render();}
+  if(wasBooting&&!booting&&!holding&&(s.status!=='connecting'||S.bootOver)){$('app').classList.remove('booting');
+    // The cover lifts into the page, it does not cut to it.
+    if(!S.reduce()){$('app').classList.add('arriving');setTimeout(()=>$('app').classList.remove('arriving'),700);}
+    render();}
 }
 // instant: the launch decision, made under the boot cover, so there is nothing to fade from.
 function openRack(why,instant=false){
   if(rk.why)return;rk.why=why;rk.order=null;rk.sel=null;
+  // Nothing of the page being left stays live: a key in mid-drag goes home, and a held compare ends.
+  if(drag.el)endDrag(false);cancelLibraryDrag();endHold();
   hideCtx();toggleSheet(false);ui.choosing=null;if(ui.library)toggleLibrary(false);
   S.listSpeakers();clearInterval(rk.poll);rk.poll=setInterval(()=>{if(!document.hidden)S.listSpeakers();},4000);   // a speaker paired meanwhile appears
-  const show=()=>{$('rack').hidden=false;$('app').classList.add('racked');$('modelBtn').textContent=titleName();rack();};
-  if(instant)show();else S.transition(show);
+  // The editor is left as DONE leaves it, so opening a speaker always lands on its home page.
+  const was=ui.mode==='edit'?ui.edit:null;
+  const show=()=>{if(was){ui.mode='listen';ui.hot=-1;$('app').classList.remove('editing');syncLights(was);}
+    $('rack').hidden=false;$('app').classList.add('racked');$('modelBtn').textContent=titleName();backKey();rack();};
+  if(instant)show();else{swapBank();S.transition(show);}
 }
 function closeRack(){
   if(!rk.why)return;rk.why=null;clearInterval(rk.poll);toggleSheet(false);   // the app's settings belong to the page being left
-  S.transition(()=>{$('rack').hidden=true;$('app').classList.remove('racked');lastDisplay=null;render();});
+  swapBank();S.transition(()=>{$('rack').hidden=true;$('app').classList.remove('racked');lastDisplay=null;render();});
 }
+// Between the Speakers page and a speaker's home page the bottom bar changes keys: the old ones drop
+// out with the page, the new ones rise in (styles under .swapping).
+function swapBank(){if(S.reduce())return;const a=$('app');a.classList.add('swapping');clearTimeout(swapBank.t);swapBank.t=setTimeout(()=>a.classList.remove('swapping'),1000);}
 function rack(){
   const sp=S.speakers,s=S.speaker,here=sp?.address;
   // The order is set when the page opens and kept while it is up, so a switch never reshuffles it.
@@ -240,13 +264,14 @@ function rack(){
   if(d.supported){
     const state=v.connecting?'connecting':v.linked||(!v.mine&&d.connected)?'linked':'off';
     if(!art.firstChild)art.innerHTML=Speaker.svg({light:-1,state,id:'pick',interactive:false});
-    Speaker.set(art,{light:v.linked?S.lit():-1,state});art.classList.toggle('off',state==='off');
+    Speaker.set(art,{light:-1,state});art.classList.toggle('off',state==='off');   // a picture: the EQ ring stays unlit
   }
   // The speaker in use without a link says why (M.dropReason) and offers only a key that can help:
   // Try again for busy controls, Bluetooth settings otherwise. Never "Reconnect".
   const r=v.dropped?M.dropReason(s.reason,s.error):null;
   const seen=!v.linked&&!v.connecting&&d.seen?`Last seen ${lastSeen(d.seen)}`:'';
-  const [led,word]=!d.supported?['','']:v.connecting?['amber blink','Connecting']:v.linked?['','']:r?['orange',r.word]:
+  const batt=v.linked&&s.battery>=0?` · ${Math.max(0,Math.min(100,s.battery))}%`:'';
+  const [led,word]=!d.supported?['','']:v.connecting?['amber blink','Connecting']:v.linked?['on','Connected'+batt]:r?['orange',r.word]:
     d.connected?['','']:['','Off or out of range'];
   const act=!d.supported?`<button class="mech go" data-help="${esc(d.model)}">Help add it</button>`:
     v.connecting?'':r?reasonKeys(r,true).replace(/^<div class="acts">|<\/div>$/g,''):
@@ -260,12 +285,21 @@ function rack(){
 // Selecting: press a key, or the arrow keys along the selector.
 function tune(address){rk.sel=address;rack();$('spkkeys').querySelector(`[data-tune="${CSS.escape(address)}"]`)?.focus({preventScroll:true});}
 $('spkkeys').addEventListener('click',e=>{const k=e.target.closest('[data-tune]');if(k)tune(k.dataset.tune);});
+// Enter or a double-click goes straight in, when the stage offers Open for that speaker.
+const openSelected=()=>$('pickinfo').querySelector('[data-open]')?.click();
+$('spkkeys').addEventListener('dblclick',e=>{const k=e.target.closest('[data-tune]');if(k){tune(k.dataset.tune);openSelected();}});
 $('spkkeys').addEventListener('keydown',e=>{
+  const k=e.key==='Enter'&&e.target.closest('[data-tune]');if(k){e.preventDefault();tune(k.dataset.tune);openSelected();return;}
   const step={ArrowLeft:-1,ArrowUp:-1,ArrowRight:1,ArrowDown:1}[e.key];if(!step)return;e.preventDefault();
   const all=[...$('spkkeys').querySelectorAll('[data-tune]')],i=all.findIndex(b=>b.dataset.tune===rk.sel);
   const next=all[Math.max(0,Math.min(all.length-1,i+step))];if(next)tune(next.dataset.tune);
 });
-document.addEventListener('visibilitychange',rackTick);
+// Shown again (from the tray, or for the first time after starting with Windows): decide as at launch,
+// with no grace, so the instrument is not shown for three seconds before this page takes over.
+// The cover goes back up for that moment, as at launch.
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&!rk.why&&S.ready()&&S.settled&&!S.linked()){rk.launch=true;rk.holdUntil=Date.now()+SHOW_HOLD;$('app').classList.add('booting');}
+  rackTick();});
 
 // Engraved conduits from each module down to the EQ button; the playing light's is lit.
 // Three wires ease down from the modules and meet the button's ring side by side; the playing
@@ -290,22 +324,22 @@ function conduits(){
 // ---- program bank -----------------------------------------------------------------------------------
 function bank(){
   const active=S.linked()?S.active():null,editKey=ui.mode==='edit'?ui.edit:null;
-  const key=(p,cls)=>{const lights=lightsOf(p.key);return `<button class="pkey ${cls}" data-key="${p.key}">
-    <span class="led"></span><span class="n">${pad2(S.number(p.key))}${hasDraft(p)?'<i class="dm" title="Unsaved draft"></i>':''}</span>${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}<span class="t" data-name="${esc(p.name)}">${esc(p.name)}</span></button>`;};
-  // YOURS is the first six saved profiles (the library's bank zone). A profile being edited that is
-  // not among them visits as a sixth key, so the editor always has a lit key. "+ new" is an editor
-  // key: it folds away on the home page (CSS), so the row never rebuilds when the mode changes.
-  const n=S.custom().length,onBank=M.bankProfiles(S.library),visit=editKey&&!S.find(editKey)?.factory&&!onBank.some(p=>p.key===editKey)?S.find(editKey):null;
-  const html=`<div class="group factory"><span class="group-label">FACTORY</span><div class="row">${S.factory.map(p=>key(p,'')).join('')}</div></div>
-    <div class="group user"><span class="group-label">YOURS</span><div class="row userrow">${onBank.map(p=>key(p,'user')).join('')}${visit?key(visit,'user visiting'):''}
-    <button class="pkey add" data-new aria-label="New profile"><span class="n">+</span><span class="t">new</span></button>
-    ${n?`<button class="pkey lib" data-library aria-controls="library"><svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true">${[0,8,16].map(x=>[0,9].map(y=>`<rect x="${x}" y="${y}" width="6" height="7" rx="1.2"/>`).join('')).join('')}</svg><span class="t lib-all">All ${n}</span><span class="t lib-close">Close</span></button>`:''}</div></div>`;
+  const key=(p,cls)=>{const lights=lightsOf(p.key);return `<button class="pkey prog ${p.factory?'':'user '}${cls}" data-key="${p.key}">
+    <span class="led"></span><span class="n">${pad2(S.number(p.key))}</span>${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}<span class="t" data-name="${esc(p.name)}">${esc(p.name)}</span></button>`;};
+  // The bar is the first twelve programs, the user's own and the factory ones alike, in the user's
+  // order. One being edited that is not among them visits as an extra key, so the editor always has
+  // a lit key. "+ new" is an editor key: it folds away on the home page (CSS), so the row never
+  // rebuilds when the mode changes.
+  const all=S.programs(),onBar=all.slice(0,M.BANK),visit=editKey&&!onBar.some(p=>p.key===editKey)?S.find(editKey):null;
+  const html=`<div class="group user"><div class="row userrow">${onBar.map(p=>key(p,'')).join('')}${visit?key(visit,'visiting'):''}
+    <button class="pkey add" data-new aria-label="New program"><span class="n">+</span><span class="t">new</span></button>
+    <button class="pkey lib" data-library aria-controls="library"><svg width="22" height="16" viewBox="0 0 22 16" aria-hidden="true">${[0,8,16].map(x=>[0,9].map(y=>`<rect x="${x}" y="${y}" width="6" height="7" rx="1.2"/>`).join('')).join('')}</svg><span class="t">All ${all.length}</span></button></div></div>`;
   if($('keys').dataset.html!==html&&!drag.started){$('keys').dataset.html=html;$('keys').innerHTML=html;}
   $('keys').querySelector('[data-new]').inert=ui.mode!=='edit';
-  const lib=$('keys').querySelector('[data-library]');if(lib){lib.setAttribute('aria-expanded',ui.library);lib.setAttribute('aria-label',ui.library?'Close the library':`Library, ${n} profiles`);}
-  $('keys').querySelectorAll('[data-key]').forEach(k=>{const p=S.find(k.dataset.key),on=active===p.key,ed=editKey===p.key;
-    k.classList.toggle('playing',on);k.classList.toggle('busy',S.busy==='apply'&&ui.pending===p.key);k.classList.toggle('editing',ed);
-    k.setAttribute('aria-label',`${pad2(S.number(p.key))} ${p.name}${on?', playing':''}${hasDraft(p)?', unsaved draft':''}`);
+  const lib=$('keys').querySelector('[data-library]');lib.setAttribute('aria-expanded',ui.library);lib.setAttribute('aria-label',`All ${all.length} programs`);
+  $('keys').querySelectorAll('[data-key]').forEach(k=>{const p=S.find(k.dataset.key);if(!p)return;const on=active===p.key,ed=editKey===p.key;
+    k.classList.toggle('playing',on);k.classList.toggle('busy',ui.pending.has(p.key));k.classList.toggle('editing',ed);
+    k.setAttribute('aria-label',`${pad2(S.number(p.key))} ${p.name}${on?', playing':''}`);
     rollName(k.querySelector('.t'),on||ed);});
   $('app').classList.toggle('choosing',ui.choosing!==null);
   fit($('keys').querySelector('.userrow'));
@@ -318,15 +352,15 @@ function bank(){
 // Every program key shares one width (--kw), chosen so the keys fill the room the display and EDIT
 // key leave; in the editor the display folds away, so they grow (the width transitions). The room is
 // projected from the display's target width, so the keys move with it, not after it. When even the
-// narrowest keys do not fit, whole saved-profile keys drop from the end; the Library has them all.
+// narrowest keys do not fit, whole keys drop from the end; All has every program.
 function fit(row){
-  const keys=$('keys'),wrap=document.querySelector('.lcdwrap'),lcd=$('lcd'),user=[...row.querySelectorAll('.pkey.user')];
+  const keys=$('keys'),wrap=document.querySelector('.lcdwrap'),lcd=$('lcd'),prog=[...row.querySelectorAll('.pkey.prog')];
   const lcdW=ui.mode!=='edit'&&getComputedStyle(lcd).display!=='none'?Math.min(210,Math.max(150,innerWidth*.13))+14:0;
   const room=keys.clientWidth+wrap.offsetWidth-(lcdW+$('editKey').offsetWidth);
-  const gap=parseFloat(getComputedStyle(row).columnGap)||8,more=ui.mode==='edit'?1:0,lib=row.querySelector('.pkey.lib')?46:0;
-  const width=n=>(room-lib-10-gap*(5+n+more))/(6+n+more);
-  let n=user.length;while(n>0&&width(n)<56)n--;
-  user.forEach((k,i)=>k.hidden=i>=n);
+  const gap=parseFloat(getComputedStyle(row).columnGap)||8,more=ui.mode==='edit'?1:0,lib=46;
+  const width=n=>(room-lib-10-gap*(n+more))/(n+more);
+  let n=prog.length;while(n>1&&width(n)<56)n--;
+  prog.forEach((k,i)=>k.hidden=i>=n&&!k.classList.contains('visiting'));
   keys.style.setProperty('--kw',Math.max(56,Math.min(112,width(n))).toFixed(1)+'px');
 }
 // A selected name too long for its key scrolls round in a loop; unselected names stay clamped.
@@ -339,54 +373,53 @@ function rollName(box,on){
   if(w-24<=box.clientWidth){box.classList.remove('rolling');box.textContent=text;box.dataset.roll='';return;}
   box.dataset.roll=text;const r=box.querySelector('.roll');r.style.setProperty('--d',w+'px');r.style.setProperty('--dur',(w/30).toFixed(1)+'s');
 }
-// ---- library: a drawer of records under the bank ----------------------------------------------
-// Every saved profile is a record: a sleeve (number, curve, name) with its disc peeking out. The
-// first six sit in the front crate, ON THE BANK; dragging a record there puts it on the bank.
+// ---- library: every program, on a page of its own -------------------------------------------------
+// Each program is a record: a square sleeve, like an album cover (number, curve, name), with its disc
+// peeking out. They are in the user's order, six to a row: the first row is what the widget shows and
+// the first two are the program bar. Dragging rearranges them; right-click has the rest.
 const MINI_GRID=`M0 7.5H100M0 22.5H100${[1,2,3,4,5,6,7,8].map(i=>`M${(i*100/9).toFixed(1)} 0V30`).join('')}`;
 const mini=p=>{const v=curveByBand(p,null,48),line=v.map((d,k)=>(k?'L':'M')+(k/(v.length-1)*100).toFixed(1)+' '+(15-d*1.6).toFixed(1)).join('');
   return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><path class="g" d="${MINI_GRID}"/><path class="z" d="M0 15H100"/>
     <path class="f" d="${line}L100 30L0 30Z"/><path class="glow" d="${line}"/><path class="c" d="${line}"/></svg>`;};
-const record=p=>{const lights=lightsOf(p.key);return `<div class="rec" data-lkey="${p.key}" role="button" tabindex="0">
+const record=p=>{const lights=lightsOf(p.key);return `<div class="rec${p.factory?' factory':''}" data-lkey="${p.key}" role="button" tabindex="0">
   <span class="discwrap" aria-hidden="true"><svg class="disc" viewBox="0 0 100 100"><use href="#disc"/></svg></span>
-  <span class="sleeve"><span class="n">${pad2(S.number(p.key))}${hasDraft(p)?'<i class="dm" title="Unsaved draft"></i>':''}</span>
+  <span class="sleeve"><span class="n">${pad2(S.number(p.key))}</span>${p.factory?'<span class="tag">≈ Factory</span>':''}
     <span class="mini">${mini(p)}</span><span class="t" data-name="${esc(p.name)}">${esc(p.name)}</span>
     ${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}</span></div>`;};
 function library(){
   const el=$('library');el.classList.toggle('open',ui.library);el.inert=!ui.library;$('app').classList.toggle('lib-open',ui.library);
   if(!ui.library&&!el.dataset.drawn)return;
-  const q=$('libsearch').value.trim().toLowerCase(),all=S.custom(),active=S.linked()?S.active():null;
-  const front=all.slice(0,M.BANK).map(record).join(''),back=all.slice(M.BANK).map(record).join('');
-  if((el.dataset.drawn!==front+back)&&!ldrag.started){el.dataset.drawn=front+back;$('libzone').innerHTML=front;$('librest').innerHTML=back;}
+  const q=$('libsearch').value.trim().toLowerCase(),all=S.programs(),active=S.linked()?S.active():null;
+  const html=all.map(record).join('');
+  if(el.dataset.drawn!==html&&!ldrag.started){el.dataset.drawn=html;$('libgrid').innerHTML=html;}
   let shown=0;
-  el.querySelectorAll('[data-lkey]').forEach(c=>{const p=S.find(c.dataset.lkey);
+  el.querySelectorAll('[data-lkey]').forEach(c=>{const p=S.find(c.dataset.lkey);if(!p)return;
     c.hidden=!!q&&!(p.name.toLowerCase().includes(q)||pad2(S.number(p.key)).includes(q));shown+=!c.hidden;
     const on=active===p.key,ed=ui.mode==='edit'&&ui.edit===p.key;
-    c.classList.toggle('playing',on);c.classList.toggle('spinning',on&&viz.listening&&viz.playing);c.classList.toggle('editing',ed);
+    c.classList.toggle('playing',on);c.classList.toggle('spinning',on&&viz.listening&&viz.playing);c.classList.toggle('editing',ed);c.classList.toggle('busy',ui.pending.has(p.key));
     rollName(c.querySelector('.t'),on||ed);});
-  for(const crate of el.querySelectorAll('.crate'))crate.hidden=!!q&&!crate.querySelector('[data-lkey]:not([hidden])');
-  el.querySelector('.crate.back').hidden||=!q&&all.length<=M.BANK;
   $('libcount').textContent=q?`${shown} of ${all.length}`:all.length;$('libempty').hidden=!q||shown>0;
 }
-function toggleLibrary(open){ui.library=open;$('libsearch').value='';render();}
+function toggleLibrary(open){if(ui.library===open)return;ui.library=open;$('libsearch').value='';hideCtx();render();}
 $('libsearch').addEventListener('input',()=>library());
-// The bank's display folds away in the editor; once it has, the YOURS row knows its real width.
+// The bank's display folds away in the editor; once it has, the row knows its real width.
 $('lcd').addEventListener('transitionend',e=>{if(e.propertyName==='width')fit($('keys').querySelector('.userrow'));});
 // Records are arranged by dragging (not while searching). Slots are measured once when the drag
 // starts, and the target is the slot under the pointer: testing against cards that are still
-// gliding made them swap back and forth. The front crate always holds the first six.
+// gliding made them swap back and forth.
 const ldrag={el:null,started:false,x0:0,y0:0,gx:0,gy:0,slots:[],at:-1,scroll0:0};
-function flip(boxes,change,skip){
-  const items=boxes.flatMap(b=>[...b.children]).filter(c=>c!==skip),before=new Map(items.map(c=>[c,c.getBoundingClientRect()]));
+function flip(box,change,skip){
+  const items=[...box.children].filter(c=>c!==skip),before=new Map(items.map(c=>[c,c.getBoundingClientRect()]));
   change();if(S.reduce())return;
   items.forEach(c=>{const a=before.get(c),b=c.getBoundingClientRect(),dx=a.left-b.left,dy=a.top-b.top;if(!dx&&!dy)return;
     c.style.transition='none';c.style.transform=`translate(${dx}px,${dy}px)`;c.getBoundingClientRect();
     c.style.transition='transform .24s var(--ease)';c.style.transform='';});
 }
 function follow(x,y){const d=ldrag,el=d.el;el.style.transform='';const r=el.getBoundingClientRect();el.style.transform=`translate(${x-d.gx-r.left}px,${y-d.gy-r.top}px)`;}
-// Puts the dragged record at list position `at`, keeping the bank's six in the front crate.
+// Puts the dragged record at list position `at`.
 function place(at){
-  const zone=$('libzone'),rest=$('librest'),el=ldrag.el,list=[...zone.children,...rest.children].filter(c=>c!==el);
-  list.splice(at,0,el);flip([zone,rest],()=>{list.forEach((c,i)=>(i<M.BANK?zone:rest).appendChild(c));},el);
+  const grid=$('libgrid'),el=ldrag.el,list=[...grid.children].filter(c=>c!==el);
+  list.splice(at,0,el);flip(grid,()=>{list.forEach(c=>grid.appendChild(c));},el);
 }
 document.addEventListener('pointerdown',e=>{
   if(e.button!==0||ldrag.el)return;const c=e.target.closest('.rec[data-lkey]');if(!c)return;
@@ -399,7 +432,7 @@ document.addEventListener('pointermove',e=>{
   const body=$('libbody');
   if(!d.started){if(Math.hypot(e.clientX-d.x0,e.clientY-d.y0)<6)return;d.started=true;
     const r=d.el.getBoundingClientRect();d.gx=d.x0-r.left;d.gy=d.y0-r.top;d.el.classList.add('held');d.scroll0=body.scrollTop;
-    const recs=[...$('libzone').children,...$('librest').children];d.at=recs.indexOf(d.el);
+    const recs=[...$('libgrid').children];d.at=recs.indexOf(d.el);
     d.slots=recs.map(c=>{const b=c.getBoundingClientRect();return {l:b.left,r:b.right,t:b.top+body.scrollTop,b:b.bottom+body.scrollTop};});}
   e.preventDefault();const B=body.getBoundingClientRect();
   if(e.clientY<B.top+30)body.scrollTop-=12;else if(e.clientY>B.bottom-30)body.scrollTop+=12;
@@ -417,6 +450,12 @@ document.addEventListener('pointerup',()=>{
   setTimeout(()=>{el.classList.remove('held');el.removeAttribute('style');S.move(el.dataset.lkey,d.at);
     $('library').dataset.drawn='';render();},S.reduce()?0:190);
 });
+// A drag that is cancelled (the pointer is taken away, or the page changes) puts the record back.
+function cancelLibraryDrag(){
+  const d=ldrag,el=d.el;if(!el)return;d.el=null;
+  if(d.started){d.started=false;el.classList.remove('held');el.removeAttribute('style');$('library').dataset.drawn='';library();}
+}
+document.addEventListener('pointercancel',cancelLibraryDrag);
 // ---- the fader plate ------------------------------------------------------------------------------
 function buildPlate(){
   if($('channels').children.length)return;
@@ -431,49 +470,46 @@ function buildPlate(){
 }
 function annunciators(p){
   const ann=(on,color,label)=>`<span class="ann ${on?'on '+color:''}"><span class="win"></span><span class="engr">${label}</span></span>`;
-  $('ann').innerHTML=p.factory?ann(true,'white','Factory'):ui.draft?ann(true,'amber','Draft'):ann(true,'white','Saved');
+  const on=S.linked()&&S.active()===p.key;
+  morph($('ann'),(p.factory?ann(true,'white','Factory'):'')+ann(ui.hold||on,'amber',ui.hold?'Playing how it was':'Playing on the speaker'));
 }
+// The editor is live: the plate shows the program as it is, the speaker plays it, and every change is
+// kept as it is made. There is nothing to save. COMPARE latches, with its lamp lit: the speaker plays the
+// program as it was when it came onto the plate, and the curve as it is now stays on the display,
+// dashed; press it again (or move a fader) to return. UNDO goes back to how it was. DUPLICATE, FLAT and
+// DELETE rest at the foot of the transport, as the plate's other keys always have.
 function surface(){
   const p=editing();if(!p)return;
   buildPlate();
-  const bands=editBands(),locked=!!p.factory;
+  const bands=editBands(),locked=!S.linked(),approx=!!p.factory;
   // Keep a name being typed, but always show the right profile's name after switching profiles.
   if(document.activeElement!==$('pname')||$('pname').dataset.key!==p.key){$('pname').value=p.name;$('pname').dataset.key=p.key;}
-  $('pname').readOnly=locked;$('pname').tabIndex=locked?-1:0;$('channels').classList.toggle('locked',locked);$('display').classList.toggle('editable',!locked);
+  $('pname').readOnly=approx;$('pname').tabIndex=approx?-1:0;$('channels').classList.toggle('locked',locked);$('display').classList.toggle('editable',!locked);
   annunciators(p);
-  const v=locked?curveByBand(p):curveByBand(p,bands);
+  const was=ui.hold&&ui.opened?.key===p.key?ui.opened.bands:null;
+  const v=was?curveByBand(p,was):approx?curveByBand(p):curveByBand(p,bands);
   if(p.key!==lastDisplay){lastDisplay=p.key;dplot.layout();dplot.pen(v);}else dplot.set(v);
-  dplot.marks(locked?null:bands);dplot.hot(ui.hot);
-  // The amber dashes: what the speaker plays, when that is not what the plate shows.
-  const pl=S.linked()?playing():null,same=pl&&(pl.factory?locked&&pl.key===p.key:M.sameBands(pl.bands,bands));
-  dplot.ghost(pl&&!same&&!draftPlaying()&&!aud.on?curveByBand(pl):null);
+  dplot.marks(approx||was?null:bands);dplot.hot(ui.hot);
+  dplot.ghost(was?curveByBand(p,bands):null);
   bands.forEach((b,i)=>{const slot=$('channels').querySelector(`[data-band="${i}"]`);slot.classList.toggle('locked',locked);
-    slot.setAttribute('aria-valuenow',b);slot.setAttribute('aria-valuetext',`${b>0?'plus ':b<0?'minus ':''}${Math.abs(b)} decibels${locked?', approximate':''}`);slot.setAttribute('aria-readonly',locked);
-    slot.querySelector('.cap').style.top=`calc(${(8-b)/16} * var(--fh))`;$('v'+i).innerHTML=`<i>${locked?'≈':b>0?'+':b<0?'−':''}</i>${Math.abs(b)}`;});
+    slot.setAttribute('aria-valuenow',b);slot.setAttribute('aria-valuetext',`${b>0?'plus ':b<0?'minus ':''}${Math.abs(b)} decibels${approx?', approximate':''}`);slot.setAttribute('aria-readonly',locked);
+    slot.querySelector('.cap').style.top=`calc(${(8-b)/16} * var(--fh))`;$('v'+i).innerHTML=`<i>${approx?'≈':b>0?'+':b<0?'−':''}</i>${Math.abs(b)}`;});
   $('channels').querySelectorAll('.chan').forEach((c,i)=>c.classList.toggle('hot',i===ui.hot));
-  const can=S.linked(),busy=S.busy==='apply',st=S.status(p);
-  const applyLabel=p.factory||!ui.draft?'Play':'Play saved';
-  const applyDis=!can||busy;
-  // Already playing: the key becomes a lit indicator instead of a faded button.
-  const applyKey=st==='playing'&&!draftPlaying()?`<button class="mech state" disabled aria-disabled="true" title="${ui.draft?'The saved version is playing':'Playing on the speaker'}">On speaker<span class="lamp"></span></button>`:null;
-  const why=!can?'Connect the speaker first':ui.draft?'Play the saved version; Audition plays the draft':'Play this on the speaker';
-  $('transport').innerHTML=locked?`<span class="engr">Transport</span>
-      <button class="mech" data-do="dup" title="Make an editable copy">Duplicate</button>${applyKey||`<button class="mech go" data-do="apply" ${applyDis?'disabled':''} title="${why}">${applyLabel}</button>`}
-      <span class="sep"></span><p class="note">Factory program: fixed in the speaker. The plate shows its shape as drawn by Tribit (≈ approximate).</p>`:
-    `<span class="engr">Transport</span>
-     <button class="mech" data-do="save" ${ui.draft?'':'disabled'} title="Save on this PC (Ctrl+S)">Save</button>
-     <button class="mech" data-do="revert" ${ui.draft?'':'disabled'}>Revert</button>
-     <button class="mech" data-do="audition" aria-pressed="${aud.on}" ${can?'':'disabled'} title="While lit, the speaker plays every change as you move the faders">Audition<span class="lamp"></span></button>
-     ${applyKey||`<button class="mech go" data-do="apply" ${applyDis?'disabled':''} title="${why}">${applyLabel}</button>`}
+  // The keys are part of the plate and never grey out. UNDO sits pressed in while there is nothing to
+  // undo, pops up as soon as a change is made, and goes back in when pressed. COMPARE latches with its lamp.
+  const changed=!!ui.opened&&ui.opened.key===p.key&&!M.sameBands(ui.opened.bands,bands);
+  morph($('transport'),`<span class="engr">Sound</span>
+     <button class="mech" data-do="compare" aria-pressed="${ui.hold}">Compare<span class="lamp"></span></button>
+     <button class="mech undo${changed?'':' sunk'}" data-do="undo" aria-disabled="${!changed}" aria-keyshortcuts="Control+Z">Undo</button>
      <span class="sep"></span>
      <button class="mech" data-do="dup">Duplicate</button>
-     <button class="mech" data-do="flat">Flat</button>
-     <button class="mech" data-do="del">Delete</button>`;
+     ${approx?'':`<button class="mech" data-do="flat">Flat</button>
+     <button class="mech del${ui.armed===p.key?' armed':''}" data-do="del" aria-pressed="${ui.armed===p.key}">${ui.armed===p.key?'Confirm':'Delete'}<span class="lamp"></span></button>`}`);
 }
 function render(){
   if(!S.ready())return;
   const off=!S.linked();
-  if(off&&aud.on){aud.on=false;aud.before=null;}
+  if(off)ui.hold=false;
   if(off)ui.choosing=null;
   $('app').classList.toggle('offline',off);
   instruments();speakerArt();bank();offlineCard();library();
@@ -481,12 +517,15 @@ function render(){
   else if(ui.mode==='listen')units();else surface();
   rackTick();
   const name=titleName();if($('modelBtn').textContent!==name)$('modelBtn').textContent=name;
+  if($('rack').hidden===!rk.why)backKey();   // not while a page change is still stepping out
   // An open list in the sheet would close if it were redrawn under the pointer.
   const f=document.activeElement;
   if(!$('sheet').hidden&&!(f?.tagName==='SELECT'&&$('sheet').contains(f)))sheet();
 }
 S.subscribe(render);
-S.onAuditionError=err=>{aud.on=false;aud.before=null;toast('Audition stopped: '+err);render();};
+// The window is closing while Hold to compare is down: the speaker goes back to the program as it is.
+addEventListener('pagehide',()=>endHold());
+S.onAuditionError=err=>{ui.hold=false;toast(err);render();};
 
 // ---- settings: one SETTINGS key whose contents follow the page --------------------------------------
 // On the Speakers page (the app's home) it holds the app's settings: appearance, updates, help. On a
@@ -498,8 +537,6 @@ function speakerSheet(){
   const s=S.speaker,st=S.settings,can=S.linked(),connecting=s.status==='connecting',r=M.dropReason(s.reason,s.error);
   // One line under the name: firmware, and why there is no link when there is none.
   const facts=[s.firmware?`Firmware ${esc(s.firmware)}`:'',can?'':connecting?'Connecting':esc(r.word),!can&&s.lastSeen?`last seen ${lastSeen(s.lastSeen)}`:''].filter(Boolean).join(' · ');
-  const keys=S.widget(),pick=ui.wpick,shown=pick??ui.lastPick??0;
-  const item=p=>`<button class="pk" data-wset="${p.key}" aria-pressed="${keys[shown]===p.key}"><span>${esc(p.name)}</span></button>`;
   return `<section><h4 class="engr">${esc(titleName())}</h4>
       ${facts?`<p class="dv-sub">${!can&&!connecting?'<span class="led orange"></span>':''}${facts}</p>`:''}
       ${!can&&!connecting&&r.hint?`<p class="dv-hint">${esc(r.hint)}</p>`:''}
@@ -507,44 +544,51 @@ function speakerSheet(){
       <div class="dv-label">Beeps${can?'':' <small>last known</small>'}</div>
       <div class="dv-chips">${BEEPS.map((l,i)=>`<button class="chip" data-dv="p${i}" aria-pressed="${s.prompts?.[i]===1}"${!can||s.prompts?.[i]<0?' disabled':''}>${l}</button>`).join('')}</div>
       ${sw(s.autoShutdown===1,'Auto shutdown','Turns off when nothing has played for a while','auto',!can||s.autoShutdown<0)}
-    </section>
-    <section><h4 class="engr">Widget</h4>
-      <div class="dv-label">Widget buttons <small>Win + W</small></div>
-      <div class="dv-wgrid">${keys.map((k,i)=>`<button class="wtile" data-wpick="${i}" aria-expanded="${pick===i}"><small>${i+1}</small>${esc(S.find(k).name)}</button>`).join('')}</div>
-      <div class="dv-pick${pick!=null?' open':''}"><div><div class="dv-list" role="group" aria-label="Button ${shown+1} plays">
-        <h5>Factory</h5>${S.factory.map(item).join('')}${S.custom().length?`<h5>Yours · ${S.custom().length}</h5>${S.custom().map(item).join('')}`:''}</div></div></div>
       ${sw(!!st.release,'Let the phone app connect','Frees this speaker shortly after the widget closes','release')}
     </section>
-    <p class="dv-note">Rename, power off, factory reset and firmware updates: use the Tribit app.</p>`;
+    <p class="dv-note">Rename, power off, factory reset and firmware updates: use the Tribit app.</p>
+    <p class="dv-note dv-more"><button class="dv-link" data-dv="appsettings">App settings ›</button><small>Appearance, widget, tray, updates</small></p>`;
+}
+// The widget: what it shows, and the two things Windows needs before it appears. Its six buttons are
+// the first six programs; this is the one place that says so (and that the bar is the first twelve).
+function widgetSection(){
+  const st=S.settings,dev=st.devMode===true,added=st.widgetAdded===true;
+  return `<section><h4 class="engr">Widget</h4>
+    <p class="dv-sub">The widget and the tray menu show your first six programs. The program bar shows the first twelve.</p>
+    ${added?'':`<div class="steps">
+      <div class="step${dev?' done':''}"><span class="no">1</span><div><b>Turn on Developer Mode</b><small>Windows shows widgets from apps outside the Microsoft Store only while this is on.</small>${dev?'<span class="ok">On</span>':'<button class="mech" data-dv="developer">Open Windows settings</button>'}</div></div>
+      <div class="step"><span class="no">2</span><div><b>Add the widget</b><small>Press Win + W, choose + Add widgets, then XSound&nbsp;Plus&nbsp;2.</small></div></div>
+    </div>`}</section>`;
 }
 // Updates: what the host reports (updates.hpp), as one line and at most two keys.
 function updateRow(){
   const st=S.settings,u=st.update||{},v=u.version?esc(u.version):'';
   const status={checking:['Checking…',true],current:['Up to date',false],failed:['Couldn’t check. Try again',false],dev:['Development build',true],
-    available:[`${v} is available`,false],downloading:['Downloading…',true],unverified:['Update didn’t verify. Try again',false],installing:['Installing…',true]}[u.state];
+    available:[`${v} is available`,false],downloading:['Downloading…',true],unverified:['Update didn’t verify. Try again',false],stalled:['Update didn’t start. Try again',false],installing:['Installing…',true]}[u.state];
   const check=`<button class="mech" data-dv="check"${status?.[1]?' disabled':''}>${status?status[0]:'Check now'}</button>`;
-  const install=u.state==='available'||u.state==='unverified'?`<button class="mech go" data-dv="install">Update to ${v}</button>`:'';
+  const install=u.state==='available'||u.state==='unverified'||u.state==='stalled'?`<button class="mech go" data-dv="install">Update to ${v}</button>`:'';
   return `${sw(st.checkUpdates!==false,'Check for updates','Once a day, from this project’s GitHub releases. Nothing about you is sent.','updates')}
     <div class="dv-row dv-update"><span class="dv-ver">Version ${esc(st.version||'')}</span>${install}${u.state==='available'?'':check}</div>`;
 }
 // Start with Windows: the package's startup task, as Windows reports it (app.cpp query_startup).
 function startupRow(){
   const v=String(S.settings.startup||'unknown'),on=v==='on'||v==='policy-on';
-  const hint={'user-off':'Turned off in Windows Settings > Apps > Startup. Turn it on there first.','policy-on':'Set by your organisation','policy-off':'Turned off by your organisation',
-    unavailable:'Only in the installed app',unknown:'Checking…'}[v]||'Opens in the tray when you sign in, so the widget is ready';
+  const hint={'user-off':'Turned off in Windows Settings > Apps > Startup. Turn it on there first.','policy-on':'Set by your organisation.','policy-off':'Turned off by your organisation.',
+    unavailable:'Only in the installed app.',unknown:'Checking…'}[v]||'Opens in the tray when you sign in, so the widget is ready.';
   return sw(on,'Start with Windows',hint,'startup',v.startsWith('policy')||v==='unavailable'||v==='unknown');
 }
 function appSheet(){
   const st=S.settings;
   return `<section><h4 class="engr">Appearance</h4><div class="dv-seg" role="group" aria-label="Appearance">${[['light','Light'],['dark','Dark'],['device','Windows']].map(([v,l])=>
       `<button data-theme-choice="${v}" aria-pressed="${Theme.choice===v}">${l}</button>`).join('')}</div></section>
+    ${widgetSection()}
     <section><h4 class="engr">Window</h4>
       ${sw(!!st.tray,'Close to tray','Closing keeps Tribit Connect in the notification area. Quit from its menu there.','tray')}
       ${startupRow()}
     </section>
     <section><h4 class="engr">Updates</h4>${updateRow()}</section>
     <section><h4 class="engr">Help</h4>
-      ${sw(!!st.logging,'Diagnostic log','Only needed for troubleshooting','logging')}
+      ${sw(!!st.logging,'Diagnostic log','Only needed for troubleshooting.','logging')}
       <div class="dv-remove">${ui.removing?`<p>Remove all profiles and settings from this PC?</p><div class="dv-row"><button class="mech danger" data-dv="remove-yes">Remove</button><button class="mech" data-dv="remove-no">Keep</button></div>`:
         `<button class="dv-link" data-dv="remove">Remove my data…</button>`}</div>
       <p class="dv-note"><button class="dv-link" data-dv="submit">Another Tribit speaker? Help add it</button></p>
@@ -554,7 +598,7 @@ function appSheet(){
 const sheetKind=()=>rk.why?'app':'speaker';
 function sheet(){
   const el=$('sheet'),kind=sheetKind();el.setAttribute('aria-label',kind==='speaker'?`${titleName()} settings`:'Tribit Connect settings');
-  if(el.dataset.kind!==kind){el.dataset.kind=kind;el.replaceChildren();}
+  if(el.dataset.kind!==kind){el.dataset.kind=kind;el.replaceChildren();el.classList.remove('swap');void el.offsetWidth;el.classList.add('swap');}
   morph(el,kind==='speaker'?speakerSheet():appSheet());
 }
 // Brings `el` in line with `html` node by node, keeping the elements that are still there, so
@@ -570,11 +614,6 @@ function sync(a,b){
     for(const at of [...m.attributes])if(n.getAttribute(at.name)!==at.value)n.setAttribute(at.name,at.value);
     sync(n,m);});
 }
-document.addEventListener('click',e=>{
-  // Redrawing the sheet can detach the clicked element, so stop here before the outside-click check.
-  const wp=e.target.closest?.('[data-wpick]');if(wp){e.stopImmediatePropagation();const i=+wp.dataset.wpick;ui.wpick=ui.wpick===i?null:i;if(ui.wpick!=null)ui.lastPick=ui.wpick;sheet();return;}
-  const ws=e.target.closest?.('[data-wset]');if(ws&&ui.wpick!=null){e.stopImmediatePropagation();S.setWidget(ui.wpick,ws.dataset.wset);ui.wpick=null;sheet();}
-});
 function toggleSheet(open){
   const el=$('sheet');clearTimeout(toggleSheet.t);el.classList.remove('closing');
   $('deviceBtn').setAttribute('aria-expanded',open);
@@ -593,83 +632,122 @@ function toast(text,action){
 function notLinked(){const r=M.dropReason(S.speaker.reason,S.speaker.error);
   const text={busy:'The speaker’s controls are busy',off:'The speaker is off or out of range',bluetooth:'Bluetooth is unavailable'}[S.speaker.reason]||'The speaker is not connected';
   toast(text,r.key==='retry'?{label:'Try again',run:()=>S.send({type:'retry'})}:undefined);}
-async function play(p){ui.pending=p.key;const r=await S.apply(p);ui.pending=null;if(!r.ok)toast(r.error);}
-// Audition: remember what played before, stream the draft, and put it back when the draft goes.
+// A key whose own write is still on its way is not sent again. Writes queue up, so several keys can
+// be waiting at once; each blinks until its own write is done.
+async function play(p){if(ui.pending.has(p.key))return;ui.pending.add(p.key);render();const r=await S.apply(p);ui.pending.delete(p.key);render();if(!r.ok)toast(r.error);}
 const raw=bands=>({preset:M.CUSTOM,bands});
-function auditionStart(){aud.on=true;const s=S.speaker;aud.before={preset:s.preset,bands:s.bands?.slice()};const b=editBands();if(b&&(s.preset!==M.CUSTOM||!M.sameBands(s.bands,b)))S.audition(raw(b));}
-function auditionRestore(){if(!aud.before||!S.linked())return;const s=S.speaker,b=aud.before;
-  if(s.preset===b.preset&&(b.preset!==M.CUSTOM||M.sameBands(s.bands,b.bands)))return;
-  S.audition(b.preset===M.CUSTOM?raw(b.bands):{preset:b.preset});}
-function auditionStop(restore){if(!aud.on)return;if(restore)auditionRestore();aud.on=false;aud.before=null;}
-// Leaving a profile (another profile, Done, Delete) keeps its draft, which is saved with it;
-// only what Audition played is undone.
-function discardDraft(){
-  if(aud.on){auditionRestore();aud.on=false;aud.before=null;}
-  return true;
+// ---- the editor is live ---------------------------------------------------------------------------
+// ui.opened is the program as it was when it came onto the plate ({key, bands}, and for a copy just
+// made from a factory program, that program's `preset`). Undo changes returns to it; Hold to compare
+// plays it while the key is down.
+function openProgram(key){const p=S.find(key);ui.opened=p?{key,bands:(p.factory?S.bandsOf(p):p.bands).slice()}:null;ui.hold=false;}
+// The program on the plate is the one the speaker plays.
+function hear(p){if(p&&!p.foreign&&S.linked()&&S.active()!==p.key)play(p);}
+function endHold(){
+  if(!ui.hold)return;ui.hold=false;
+  const p=editing(),b=editBands();if(p&&b&&S.linked())S.audition(p.factory?{preset:p.id}:raw(b));
 }
-const openDraft=key=>{const p=S.find(key);ui.draft=p&&p.draft?p.draft.slice():null;};
-const keepDraft=()=>{const p=editing();if(p&&!p.factory)S.setDraft(p.key,ui.draft);};
+function undoChanges(){
+  const p=editing(),o=ui.opened;if(!p||p.factory||!o||o.key!==p.key||M.sameBands(o.bands,p.bands))return;
+  S.setBands(p.key,o.bands.slice());if(S.linked())S.audition(raw(o.bands));lastDisplay=null;render();
+}
+// Lights that hold the program just edited are written again, so a light never plays an older
+// version of it. (Rewrite on the light's module does the same by hand if this could not.)
+async function syncLights(key){
+  if(!key||!S.linked())return;
+  for(let i=0;i<3;i++){const v=S.slots()[i];if(v.key===key&&v.status==='stale')await S.assign(i,key);}
+}
+// Editing plays every change on the speaker, so it needs the speaker.
 function enterEdit(key){
+  if(!S.linked()){notLinked();return;}
   const a=key?S.find(key):playing();
-  const target=a&&!a.foreign?a:S.factory[1];
-  S.transition(()=>{ui.mode='edit';ui.edit=target.key;openDraft(target.key);ui.choosing=null;lastDisplay=null;$('app').classList.add('editing');render();});
+  const target=a&&!a.foreign?a:S.programs()[0];
+  S.transition(()=>{ui.mode='edit';ui.edit=target.key;openProgram(target.key);ui.choosing=null;lastDisplay=null;$('app').classList.add('editing');render();hear(target);});
 }
-function leaveEdit(){if(!discardDraft())return;S.transition(()=>{ui.mode='listen';ui.hot=-1;$('app').classList.remove('editing');render();});}
-function load(key){if(key===ui.edit)return;discardDraft();ui.edit=key;openDraft(key);render();}
+function leaveEdit(){endHold();const was=ui.edit;S.transition(()=>{ui.mode='listen';ui.hot=-1;$('app').classList.remove('editing');render();syncLights(was);});}
+function load(key){if(key===ui.edit||!S.find(key))return;endHold();const was=ui.edit;ui.edit=key;openProgram(key);render();hear(S.find(key));syncLights(was);}
 function setBand(i,v){
-  const p=editing();if(!p||p.factory)return;
-  const b=(ui.draft||p.bands).slice();v=Math.max(-8,Math.min(8,Math.round(v)));if(b[i]===v)return;
-  b[i]=v;ui.draft=M.sameBands(b,p.bands)?null:b;keepDraft();
-  if(aud.on)S.audition(raw(b));   // queued: only the newest curve is sent
+  let p=editing();if(!p||!S.linked())return;
+  ui.hold=false;if(ui.armed)disarm();
+  v=Math.max(-8,Math.min(8,Math.round(v)));
+  const b=(p.factory?S.bandsOf(p):p.bands).slice();if(b[i]===v)return;
+  // A factory program is fixed in the speaker: the first change makes a copy, and the copy is edited.
+  if(p.factory){const from=p,key=S.create({from:p.key});ui.edit=key;ui.opened={key,bands:b.slice(),preset:from.id};p=S.find(key);toast(`Made ${p.name}, a copy you can change`);}
+  b[i]=v;S.setBands(p.key,b);S.audition(raw(b));   // queued: only the newest curve is sent
   surface();bank();
 }
+// "+ new" starts a flat program after the current one; DUPLICATE is the way to copy one.
 function newProfile(){
-  if(ui.mode==='edit'&&!discardDraft())return;
-  const from=ui.mode==='edit'?editing():playing();let key;
-  if(from&&from.foreign){key=S.create({name:'From the speaker'});S.save(key,S.speaker.bands.slice());}
-  else key=S.create({from:from?from.key:null});
-  if(ui.mode==='edit'){ui.edit=key;ui.draft=null;render();}else enterEdit(key);
-  setTimeout(()=>{$('pname').focus();$('pname').select();},ui.mode==='edit'?0:520);
+  const cur=ui.mode==='edit'?editing():playing();
+  const key=S.create({name:'New program',after:cur&&!cur.foreign?cur.key:null});
+  const editing_=ui.mode==='edit';
+  if(editing_)load(key);else enterEdit(key);
+  setTimeout(()=>{if(ui.edit===key){$('pname').focus();$('pname').select();}},editing_?0:560);
+}
+// The EQ button on the drawing does what the real one does: the next light's program.
+function nextLight(){
+  if(!S.linked()){notLinked();return;}
+  const i=(S.lit()+1)%3,v=S.slots()[i],p=v.key&&v.key!=='custom'?S.find(v.key):null;
+  if(p){play(p);return;}
+  const hw=S.speaker.buttons?.[i];if(hw&&hw.preset===M.CUSTOM&&Array.isArray(hw.bands))S.audition(raw(hw.bands));
 }
 async function assign(i,key){
   const p=S.find(key);if(!p||p.foreign)return;
   const r=await S.assign(i,key);toast(r.ok?`${Speaker.NAMES[i]} now selects ${p.name}`:r.error);
 }
-// Right-clicking a record opens a small menu: Edit, Duplicate, Delete (Delete offers Undo).
-document.addEventListener('contextmenu',e=>{
-  const r=e.target.closest('.rec[data-lkey]');if(!r){hideCtx();return;}e.preventDefault();
-  const m=$('ctx');m.dataset.key=r.dataset.lkey;
-  m.innerHTML='<button data-ctx="edit" role="menuitem">Edit</button><button data-ctx="dup" role="menuitem">Duplicate</button><span class="sep"></span><button data-ctx="del" class="danger" role="menuitem">Delete</button>';
-  m.hidden=false;m.style.left=Math.min(e.clientX,innerWidth-m.offsetWidth-8)+'px';m.style.top=Math.min(e.clientY,innerHeight-m.offsetHeight-8)+'px';
+// Right-clicking a record or a program key opens a small menu. Delete offers Undo. A factory program
+// can be opened and copied, nothing else.
+function menu(key,x,y){
+  const p=S.find(key),m=$('ctx');if(!p)return;m.dataset.key=key;
+  m.innerHTML=`<button data-ctx="edit" role="menuitem">Edit</button><button data-ctx="dup" role="menuitem">Duplicate</button>${p.factory?'':
+    '<span class="sep"></span><button data-ctx="del" class="danger" role="menuitem">Delete</button>'}`;
+  m.hidden=false;
+  m.style.left=Math.max(8,Math.min(x,innerWidth-m.offsetWidth-8))+'px';m.style.top=Math.max(8,Math.min(y,innerHeight-m.offsetHeight-8))+'px';
   m.querySelector('button').focus({preventScroll:true});
+}
+document.addEventListener('contextmenu',e=>{
+  const r=e.target.closest('.rec[data-lkey],.pkey[data-key]');if(!r){hideCtx();return;}e.preventDefault();
+  menu(r.dataset.lkey||r.dataset.key,e.clientX,e.clientY);
 });
 function hideCtx(){$('ctx').hidden=true;}
 $('libbody').addEventListener('scroll',hideCtx);
-// Deleting keeps Undo; a profile open in the editor hands over to its neighbour.
+// Delete takes two presses: the first arms it (pressed in, red lamp, CONFIRM; in the menu, "Delete …?"),
+// the second within ARM_MS deletes. Anything else, or waiting, disarms it.
+const ARM_MS=3000;
+function armDelete(key){ui.armed=key;clearTimeout(armDelete.t);armDelete.t=setTimeout(disarm,ARM_MS);if(ui.mode==='edit')surface();}
+function disarm(){if(!ui.armed)return;ui.armed=null;clearTimeout(armDelete.t);if(ui.mode==='edit')surface();
+  const c=$('ctx').querySelector('[data-ctx=del].armed');if(c){c.classList.remove('armed');c.textContent='Delete';}}
+// Deleting keeps Undo; a program open in the editor hands over to its neighbour.
 function removeProfile(key){
-  const p=S.find(key),i=S.custom().findIndex(x=>x.key===key),open=ui.mode==='edit'&&ui.edit===key;
-  if(open)discardDraft();
-  const undo=S.remove(key),left=S.custom();
-  if(open){ui.edit=(left[i]||left[i-1]||S.factory[1]).key;openDraft(ui.edit);}
-  render();toast(`Deleted ${p.name}`,{label:'Undo',run:()=>{S.undo(undo);if(open){ui.edit=undo.profile.key;openDraft(ui.edit);}render();}});
+  const p=S.find(key);if(!p||p.factory)return;
+  const i=S.programs().findIndex(x=>x.key===key),open=ui.mode==='edit'&&ui.edit===key;
+  if(open)endHold();
+  const undo=S.remove(key),left=S.programs();
+  if(open){ui.edit=null;load(left[Math.min(i,left.length-1)].key);}
+  render();toast(`Deleted ${p.name}`,{label:'Undo',run:()=>{S.undo(undo);if(open&&ui.mode==='edit')load(undo.profile.key);render();}});
 }
 document.addEventListener('click',async e=>{
   const t=e.target;
   const cx=t.closest('[data-ctx]');
-  if(cx){const key=$('ctx').dataset.key,what=cx.dataset.ctx;hideCtx();
+  // Any press other than the armed Delete itself disarms it.
+  if(ui.armed&&!t.closest('[data-do=del]')&&!(cx&&cx.dataset.ctx==='del'))disarm();
+  if(cx&&cx.dataset.ctx==='del'&&!cx.classList.contains('armed')){const p=S.find($('ctx').dataset.key);
+    if(p){cx.classList.add('armed');cx.textContent=`Delete ${p.name}?`;armDelete(p.key);}return;}
+  if(cx){const key=$('ctx').dataset.key,what=cx.dataset.ctx;hideCtx();if(what==='del')disarm();
     if(what==='edit'){toggleLibrary(false);ui.mode==='edit'?load(key):enterEdit(key);}
-    else if(what==='dup'){const k=S.create({from:key});toast(`Made ${S.find(k).name}`);}
+    else if(what==='dup'){const k=S.create({from:key});
+      if(ui.mode==='edit'&&ui.edit===key&&!ui.library){load(k);$('pname').focus();$('pname').select();}else toast(`Made ${S.find(k).name}`);}
     else if(what==='del')removeProfile(key);
     return;}
   if(!t.closest('#ctx'))hideCtx();
   const win=t.closest('[data-win]');if(win){Bridge.send({type:'window',action:win.dataset.win});return;}
-  // ‹ Speakers: back to the app's home, the Speakers page.
-  if(t.closest('#backBtn')){toggleSheet(false);openRack('manual');return;}
+  // ‹ Speakers: to the app's home, the Speakers page. (There is no way back from it but Open.)
+  if(t.closest('#backBtn')){toggleSheet(false);if(!rk.why)openRack('manual');return;}
   const op=t.closest('[data-open]');
   if(op){const a=op.dataset.open;
     // The speaker in use: back to it. Another: switch, and the page closes once it links.
     if(a===S.speakers?.address&&S.linked()){S.choose(a,false);closeRack();}
-    else{rk.why='switch';rk.dropped=false;S.choose(a);}
+    else{rk.why='switch';rk.dropped=false;rk.switchAt=Date.now();S.choose(a);}
     return;}
   const help=t.closest('[data-help]');if(help){S.send({type:'openSubmit',model:help.dataset.help});return;}
   const dv=t.closest('[data-dv]')?.dataset.dv;
@@ -686,12 +764,17 @@ document.addEventListener('click',async e=>{
     else if(dv==='check')S.checkUpdate();else if(dv==='install')S.installUpdate();
     else if(dv==='updates')S.setCheckUpdates(S.settings.checkUpdates===false);
     else if(dv==='tray')S.setTray(!S.settings.tray);
+    else if(dv==='developer')S.send({type:'openDeveloper'});
+    // The app's own settings live on the Speakers page: go there and open them.
+    else if(dv==='appsettings'){openRack('manual');setTimeout(()=>{if(rk.why)toggleSheet(true);},S.reduce()?0:380);}
     else if(dv==='startup')S.setStartup(S.settings.startup!=='on');
     return;}
   if(t.closest('#deviceBtn')){toggleSheet($('sheet').hidden);return;}
-  if(!$('sheet').hidden&&!t.closest('#sheet')){ui.wpick=null;toggleSheet(false);}
+  // A click outside Settings only closes it; it does not also press what was under it.
+  if(!$('sheet').hidden&&!t.closest('#sheet')){ui.wpick=null;toggleSheet(false);return;}
   if(t.closest('#editKey')){ui.library=false;ui.mode==='edit'?leaveEdit():enterEdit();return;}
   const rw=t.closest('[data-rewrite]');if(rw){const i=+rw.dataset.rewrite;assign(i,S.slots()[i].key);return;}
+  if(t.closest('#spk .spk-eq')){nextLight();return;}
   const arm=t.closest('[data-arm]');if(arm){const i=+arm.dataset.arm;ui.choosing=ui.choosing===i?null:i;render();return;}
   if(t.closest('[data-new]')){newProfile();return;}
   if(t.closest('[data-library]')){toggleLibrary(!ui.library);return;}
@@ -709,27 +792,34 @@ document.addEventListener('click',async e=>{
     if(!S.linked()){notLinked();return;}
     play(p);return;}
   const d=t.closest('[data-do]')?.dataset.do;if(!d)return;
-  const p=editing();
-  if(d==='save'){S.save(p.key,ui.draft);if(aud.on)aud.before={preset:M.CUSTOM,bands:ui.draft.slice()};ui.draft=null;toast(`Saved ${p.name} on this PC`);render();}
-  else if(d==='revert'){
-    // The draft goes back to the saved curve; Audition, if lit, follows it. Undo brings it back.
-    const old=ui.draft;ui.draft=null;keepDraft();if(aud.on)S.audition(raw(p.bands));lastDisplay=null;render();
-    toast('Draft discarded',{label:'Undo',run:()=>{if(ui.edit!==p.key)return;ui.draft=old;keepDraft();if(aud.on)S.audition(raw(old));lastDisplay=null;render();}});}
-  else if(d==='flat'){const flat=B.freqs.map(()=>0);ui.draft=M.sameBands(p.bands,flat)?null:flat;keepDraft();if(aud.on)S.audition(raw(flat));lastDisplay=null;render();}
-  else if(d==='dup'){discardDraft();const key=S.create({from:p.key});if(ui.draft)S.save(key,ui.draft.slice());ui.edit=key;ui.draft=null;render();$('pname').focus();$('pname').select();}
-  else if(d==='audition'){if(aud.on)auditionStop(true);else auditionStart();render();}
-  else if(d==='apply'){aud.on=false;aud.before=null;const r=await S.apply(p);toast(r.ok?`Playing ${p.name}`:r.error);render();}
-  else if(d==='del')removeProfile(p.key);
+  const p=editing();if(!p||ui.mode!=='edit')return;
+  if(d==='undo')undoChanges();
+  // Compare: lit, the speaker plays the program as it was; pressed again, as it is.
+  else if(d==='compare'){if(ui.hold){endHold();surface();return;}
+    const o=ui.opened;if(!o||!S.linked())return;ui.hold=true;S.audition(o.preset!=null?{preset:o.preset}:raw(o.bands));surface();}
+  else if(d==='dup'){endHold();const k=S.create({from:p.key});load(k);$('pname').focus();$('pname').select();}
+  else if(d==='flat'){const flat=B.freqs.map(()=>0);endHold();S.setBands(p.key,flat);if(S.linked())S.audition(raw(flat));lastDisplay=null;render();}
+  else if(d==='del'){if(ui.armed===p.key){disarm();removeProfile(p.key);}else armDelete(p.key);}
 });
 $('pname').addEventListener('change',e=>{const p=editing();if(p&&!p.factory)S.rename(p.key,e.target.value);});
 $('pname').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Escape')e.target.blur();});
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if(rk.why==='manual'&&S.linked()){closeRack();return;}if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}}
-  const uk=e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&e.target.closest?.('.pkey.user');
-  if(uk){e.preventDefault();const key=uk.dataset.key,i=S.custom().findIndex(p=>p.key===key);S.move(key,i+(e.key==='ArrowRight'?1:-1));
+  if(typeof e.key!=='string')return;   // autofill and some input methods send key events without a key
+  // Escape closes what is on top first: the menu, then Settings, then the page under them.
+  // A key press other than Enter or Space on the armed Delete disarms it (Escape included).
+  if(ui.armed&&!((e.key==='Enter'||e.key===' ')&&e.target.closest?.('[data-do=del],[data-ctx=del]'))){disarm();if(e.key==='Escape')return;}
+  // Escape closes what is on top first: the menu, then Settings, the library, a light's pick, and last
+  // the editor (as DONE). Escape while renaming only ends the rename; on the Speakers page it does nothing.
+  if(e.key==='Escape'){if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(rk.why)return;if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}
+    if(ui.mode==='edit'&&e.target.id!=='pname'&&!drag.started){leaveEdit();return;}}
+  if((e.key==='Enter'||e.key===' ')&&e.target.closest?.('#spk .spk-eq')){e.preventDefault();nextLight();return;}
+  const uk=e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&e.target.closest?.('.pkey.prog');
+  if(uk){e.preventDefault();const key=uk.dataset.key,i=S.programs().findIndex(p=>p.key===key);S.move(key,i+(e.key==='ArrowRight'?1:-1));
     $('keys').querySelector(`[data-key="${key}"]`)?.focus();return;}
-  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();if(ui.draft)document.querySelector('[data-do=save]')?.click();return;}
-  const s=e.target.closest?.('.slot');if(!s)return;
+  // Undo and the fader keys belong to the editor while it is on screen.
+  const inEditor=ui.mode==='edit'&&!rk.why&&!ui.library;
+  if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'&&inEditor&&e.target.id!=='pname'){e.preventDefault();undoChanges();return;}
+  const s=inEditor&&e.target.closest?.('.slot');if(!s)return;
   const i=+s.dataset.band,b=editBands()[i];
   const step={ArrowUp:1,ArrowDown:-1,PageUp:4,PageDown:-4}[e.key];
   if(step!=null){e.preventDefault();setBand(i,b+step);}
@@ -737,6 +827,10 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='0'){setBand(i,0);}
   else if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();$('channels').querySelector(`[data-band="${Math.max(0,Math.min(N-1,i+(e.key==='ArrowRight'?1:-1)))}"]`)?.focus();}
 });
+// The focus ring shows only while moving around with Tab; a press with the mouse or a finger hides it.
+// (The browser's own rule also drew it on a clicked button as soon as any key was pressed.)
+addEventListener('keydown',e=>{if(e.key==='Tab')document.documentElement.classList.add('kbd');},true);
+addEventListener('pointerdown',()=>document.documentElement.classList.remove('kbd'),true);
 // A band column lights up on the plate and on the display together.
 function setHot(i){if(ui.hot===i)return;ui.hot=i;dplot.hot(i);$('channels').querySelectorAll('.chan').forEach((c,k)=>c.classList.toggle('hot',k===i));}
 document.addEventListener('pointerover',e=>{if(ui.mode!=='edit')return;const c=e.target.closest('[data-chan]');if(c)setHot(+c.dataset.chan);});
@@ -760,69 +854,47 @@ document.addEventListener('pointerdown',e=>{
 });
 // Double-clicking the cap itself zeroes the band; two quick presses on the track just move it.
 document.addEventListener('dblclick',e=>{const c=ui.mode==='edit'&&e.target.closest('.cap');if(c)setBand(+c.closest('.slot').dataset.band,0);});
-// Drag a program key onto a module (pressing the module's key, then a program, does the same).
-// Dragging a program key moves the key itself (no browser drag image). Along the YOURS row it
-// rearranges saved profiles: the key follows the pointer and the others slide aside. Lifted out of
-// the row (or any factory key), it is carried over the light modules, and dropping it on one assigns it.
-const drag={el:null,key:null,user:false,x0:0,y0:0,cx:0,cy:0,started:false,mode:null,row:null,scroll0:0,from:0,to:0,step:0,others:[],gap:null,rect:null};
+// Dragging a program key rearranges the bar: the key follows the pointer along its row, never off it,
+// and the others slide aside. (A light is given a program by pressing its key, then the program.)
+const drag={el:null,key:null,x0:0,y0:0,started:false,row:null,from:0,to:0,step:0,others:[]};
 function startDrag(e){
   const d=drag,el=d.el;d.started=true;try{el.setPointerCapture(e.pointerId);}catch{}
-  d.rect=el.getBoundingClientRect();el.classList.add('held');
-  if(d.user){d.row=el.parentElement;d.scroll0=d.row.scrollLeft;d.row.classList.add('sorting');
-    const keys=[...d.row.querySelectorAll('.pkey.user:not([hidden])')];d.from=d.to=keys.indexOf(el);d.others=keys;
-    d.step=keys.length>1?keys[1].getBoundingClientRect().left-keys[0].getBoundingClientRect().left:d.rect.width;
-    d.mode='row';}else carry(e);
-}
-// Lift the key out of the row so it can travel over the modules; an empty slot holds its place.
-function carry(e){
-  const d=drag,el=d.el;if(d.mode==='carry')return;
-  d.others.forEach(k=>{if(k!==el)k.style.transform='';});
-  const r=el.getBoundingClientRect();d.gap=document.createElement('span');d.gap.className='pkey gap';el.before(d.gap);
-  document.body.append(el);el.classList.add('carried');Object.assign(el.style,{left:r.left+'px',top:r.top+'px',transform:''});
-  d.cx=e.clientX;d.cy=e.clientY;d.mode='carry';   // from here the key moves with the pointer from where it was lifted
+  el.classList.add('held');d.row=el.parentElement;d.row.classList.add('sorting');
+  const keys=[...d.row.querySelectorAll('.pkey.prog:not([hidden]):not(.visiting)')];d.from=d.to=keys.indexOf(el);d.others=keys;
+  d.step=keys.length>1?keys[1].getBoundingClientRect().left-keys[0].getBoundingClientRect().left:el.getBoundingClientRect().width;
 }
 function moveDrag(e){
-  const d=drag,el=d.el;let dx=e.clientX-d.x0,dy=e.clientY-d.y0;
-  if(d.mode==='row'&&dy<-48)carry(e);
-  if(d.mode==='carry'){
-    el.style.transform=`translate(${e.clientX-d.cx}px,${e.clientY-d.cy}px)`;
-    const hit=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-unit]');
-    document.querySelectorAll('.unit').forEach(u=>u.classList.toggle('drop',u===hit&&!u.querySelector('.lampkey').disabled));
-    return;
-  }
-  const n=d.others.length;dx=Math.max(-d.from*d.step,Math.min((n-1-d.from)*d.step,dx));
+  const d=drag,el=d.el,n=d.others.length,dx=Math.max(-d.from*d.step,Math.min((n-1-d.from)*d.step,e.clientX-d.x0));
   el.style.transform=`translateX(${dx}px) translateY(-4px)`;
   const to=Math.max(0,Math.min(n-1,d.from+Math.round(dx/d.step)));if(to===d.to)return;d.to=to;
   d.others.forEach((k,i)=>{if(k===el)return;const shift=i>d.from&&i<=to?-d.step:i<d.from&&i>=to?d.step:0;k.style.transform=shift?`translateX(${shift}px)`:'';});
 }
 function endDrag(commit){
   const d=drag,el=d.el;if(!el)return;
-  document.querySelectorAll('.unit.drop').forEach(u=>u.classList.remove('drop'));
-  const done=()=>{el.classList.remove('held','carried');el.removeAttribute('style');d.gap?.replaceWith(el);d.row?.classList.remove('sorting');
-    d.others.forEach(k=>k.style.transform='');Object.assign(d,{el:null,started:false,mode:null,row:null,gap:null,others:[]});
+  const done=()=>{el.classList.remove('held');el.removeAttribute('style');d.row?.classList.remove('sorting');
+    d.others.forEach(k=>k.style.transform='');Object.assign(d,{el:null,started:false,row:null,others:[]});
     $('keys').dataset.html='';bank();};
-  if(!commit){done();return;}
-  if(d.mode==='carry'){const hit=commit.closest?.('[data-unit]');const key=d.key;done();if(hit&&!hit.querySelector('.lampkey').disabled)assign(+hit.dataset.unit,key);return;}
-  // Settle the key into its new slot, then save the order (the redraw renumbers the keys).
-  // The bank is the first six profiles, so a drop lands at the library position of the key it was dropped on.
-  const key=d.key,to=d.to,from=d.from,target=S.custom().findIndex(p=>p.key===d.others[to]?.dataset.key);el.style.transition='transform .18s var(--ease)';el.style.transform=`translateX(${(to-from)*d.step}px)`;
-  setTimeout(()=>{done();if(to!==from&&target>=0)S.move(key,target);},S.reduce()?0:180);
+  if(!commit||!d.started){done();return;}
+  // Settle the key into its new slot, then save the order (the redraw renumbers the keys). The bar is
+  // the first programs in order, so a place on the bar is the same place in the list.
+  const key=d.key,to=d.to,from=d.from;el.style.transition='transform .18s var(--ease)';el.style.transform=`translateX(${(to-from)*d.step}px)`;
+  setTimeout(()=>{done();if(to!==from)S.move(key,to);},S.reduce()?0:180);
 }
 document.addEventListener('pointerdown',e=>{
-  if(e.button!==0||drag.el)return;const k=e.target.closest('.pkey[data-key]');if(!k)return;
-  Object.assign(drag,{el:k,key:k.dataset.key,user:k.classList.contains('user')&&!k.classList.contains('visiting'),x0:e.clientX,y0:e.clientY,started:false,mode:null,gap:null,others:[]});
+  if(e.button!==0||drag.el)return;const k=e.target.closest('.pkey.prog[data-key]');if(!k||k.classList.contains('visiting'))return;
+  Object.assign(drag,{el:k,key:k.dataset.key,x0:e.clientX,y0:e.clientY,started:false,others:[]});
 });
 document.addEventListener('pointermove',e=>{
   if(!drag.el)return;
   if(!drag.started){if(Math.hypot(e.clientX-drag.x0,e.clientY-drag.y0)<6)return;startDrag(e);}
   e.preventDefault();moveDrag(e);
 });
-document.addEventListener('pointerup',e=>{
+document.addEventListener('pointerup',()=>{
   if(!drag.el)return;if(!drag.started){drag.el=null;return;}
   // The click that follows a drag must not also play the program.
   const swallow=ev=>{ev.stopImmediatePropagation();ev.preventDefault();};
   addEventListener('click',swallow,{capture:true,once:true});setTimeout(()=>removeEventListener('click',swallow,true),0);
-  endDrag(drag.mode==='carry'?(document.elementFromPoint(e.clientX,e.clientY)||document.body):true);
+  endDrag(true);
 });
 document.addEventListener('pointercancel',()=>{if(drag.started)endDrag(false);else drag.el=null;});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&drag.started)endDrag(false);});
@@ -834,6 +906,15 @@ S.listSpeakers();   // two supported speakers and no choice yet: the Speakers pa
 // #edit opens the editor on the first saved profile, #device the sheet (reviews and screenshots).
 // #settings opens SETTINGS once the launch has settled (reviews and screenshots).
 if(location.hash==='#settings'||location.hash==='#device'){const off=S.subscribe(()=>{if(S.settled&&!$('app').classList.contains('booting')){off();setTimeout(()=>toggleSheet(true),400);}});}
-if(location.hash==='#edit'){const go=()=>{const k=S.custom()[0]?.key;if(k){ui.mode='edit';ui.edit=k;$('app').classList.add('editing');render();}};
+// Reviews and screenshots: #speakers opens the Speakers page as the back key does; ?edit opens the
+// editor first, so the two can be checked together.
+if(/[?&]edit\b/.test(location.search)||location.hash==='#speakers'){const off=S.subscribe(()=>{if(!S.settled||$('app').classList.contains('booting'))return;off();
+  const k=S.custom()[0]?.key;if(/[?&]edit\b/.test(location.search)&&k&&!rk.why){ui.mode='edit';ui.edit=k;openProgram(k);$('app').classList.add('editing');render();}
+  if(location.hash==='#speakers')setTimeout(()=>openRack('manual'),300);});}
+// A library that could not be read is said once; the file itself was set aside, not replaced.
+{const off=S.subscribe(()=>{if(!S.ready())return;off();if(S.libraryError)toast('Your profiles could not be read. The file was kept as profiles.bad in the data folder.',{label:'OK',run(){}});});}
+// #library opens All programs.
+if(location.hash==='#library'){const off=S.subscribe(()=>{if(!S.settled||$('app').classList.contains('booting'))return;off();setTimeout(()=>toggleLibrary(true),300);});}
+if(location.hash==='#edit'){const go=()=>{const k=S.custom()[0]?.key;if(k){ui.mode='edit';ui.edit=k;openProgram(k);$('app').classList.add('editing');render();}};
   if(S.ready())go();else{const off=S.subscribe(()=>{if(S.ready()){off();go();}});}}
 })();

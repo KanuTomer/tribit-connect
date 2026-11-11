@@ -3,6 +3,7 @@
 #include <winrt/base.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -33,6 +34,9 @@ inline constexpr std::array<const char*,3> kLightLabels{"Light off","White light
 inline std::string preset_label(int preset){return preset<0?"Not checked":tribit::preset_name(static_cast<uint8_t>(preset));}
 inline bool valid_preset(int preset){return std::find(kPresetOrder.begin(),kPresetOrder.end(),preset)!=kPresetOrder.end();}
 
+// A command the app refuses (a bad argument, or controls that are not open): only that command fails.
+// It says nothing about the link, which stays as it is.
+struct Rejected:std::runtime_error{using std::runtime_error::runtime_error;};
 enum class Operation { Activate, Deactivate, Retry, Preset, CustomEq, Prompt, AutoShutdown, Buttons, Policy, Suspend, Reconnect, Disconnect, Choose };
 using Bands=std::array<int,tribit::kEqBands>;
 // `id` (non-zero) asks for a result callback once the speaker confirms or the command fails.
@@ -51,6 +55,9 @@ public:
         SetEvent(wake_);
     }
     void lifecycle(Operation operation){std::lock_guard lock(mutex_);if(std::none_of(commands_.begin(),commands_.end(),[&](auto& c){return c.operation==operation;}))commands_.push_back({operation});SetEvent(wake_);}
+    // The window is hidden in the tray: the speaker is let go once nothing is showing, whatever
+    // "Let the phone app connect" says, as it would be if the window had been closed.
+    void release_always(bool always){release_always_=always;}
     void release_when_hidden(bool release){
         {std::lock_guard lock(mutex_);state_.release_when_hidden=release;commands_.push_back({Operation::Policy});SetEvent(wake_);}
         notify_();
@@ -87,6 +94,8 @@ private:
     std::function<void()> notify_;
     std::deque<Command> commands_;
     bool requested_active_{}, stopping_{};
+    std::atomic<bool> release_always_{};
+    bool releases()const{return release_always_||snapshot().release_when_hidden;}
     std::thread worker_;
 
     void report(int id,bool ok,const std::string& error={}){if(id&&on_result)on_result(id,ok,error);}
@@ -133,7 +142,7 @@ private:
     // Custom curves: -8..+8 dB per band. The speaker stores anything, so the limit is ours.
     static tribit::Eq custom_eq(const Bands& bands){
         tribit::Eq eq{tribit::Custom};
-        for(size_t i=0;i<bands.size();++i){if(bands[i]<-8||bands[i]>8)throw std::runtime_error("Band gains must be between -8 and +8 dB.");eq.bands[i]=static_cast<uint8_t>(bands[i]+tribit::kBandZero);}
+        for(size_t i=0;i<bands.size();++i){if(bands[i]<-8||bands[i]>8)throw Rejected("Band gains must be between -8 and +8 dB.");eq.bands[i]=static_cast<uint8_t>(bands[i]+tribit::kBandZero);}
         return eq;
     }
     // Publishes a confirmed snapshot together with the queue state, so the widget gets one update, not three.
@@ -163,14 +172,14 @@ private:
         bool confirmed=false;
         // Each change reads back only the setting it touched; a full read costs about half a second.
         if(command.operation==Operation::Preset){
-            if(!valid_preset(command.value))throw std::runtime_error("Unknown EQ preset.");
+            if(!valid_preset(command.value))throw Rejected("Unknown EQ preset.");
             acknowledged(speaker.request(SetEq,eq_payload({static_cast<uint8_t>(command.value)})),"The preset change");
             read_eq(speaker,next);confirmed=next.preset==command.value;
         }else if(command.operation==Operation::CustomEq){
             acknowledged(speaker.request(SetEq,eq_payload(custom_eq(command.bands))),"The custom EQ");
             read_eq(speaker,next);confirmed=next.preset==Custom&&next.bands==command.bands;
         }else if(command.operation==Operation::Prompt){
-            if(command.index<0||command.index>4||std::any_of(next.prompts.begin(),next.prompts.end(),[](int v){return v<0;}))throw std::runtime_error("Voice prompts have not been read.");
+            if(command.index<0||command.index>4||std::any_of(next.prompts.begin(),next.prompts.end(),[](int v){return v<0;}))throw Rejected("Voice prompts have not been read.");
             VoicePrompts prompts{};for(size_t i=0;i<prompts.size();++i)prompts[i]=next.prompts[i]==1;
             prompts[command.index]=command.value!=0;
             acknowledged(speaker.request(SetVoicePrompts,voice_prompts_payload(prompts)),"The voice prompt change");
@@ -184,13 +193,13 @@ private:
             for(size_t i=0;i<slots.size();++i){
                 if(command.buttons[i]==Custom)slots[i]=custom_eq(command.button_bands[i]);
                 else if(valid_preset(command.buttons[i]))slots[i]=Eq{static_cast<uint8_t>(command.buttons[i])};
-                else throw std::runtime_error("Unknown EQ preset.");
+                else throw Rejected("Unknown EQ preset.");
             }
             speaker.send(eq_slots_write(slots));
             acknowledged(speaker.collect(SetEqButtons,3,1500ms),"The EQ button change");
             read_buttons(speaker,next);confirmed=next.buttons==command.buttons;
             for(size_t i=0;i<slots.size();++i)if(command.buttons[i]==Custom&&next.button_bands[i]!=command.button_bands[i])confirmed=false;
-        }else throw std::runtime_error("Unsupported setting command.");
+        }else throw Rejected("Unsupported setting command.");
         // A change only counts once the speaker reports it back.
         if(!confirmed)throw std::runtime_error("The speaker did not confirm the change.");
         commit(std::move(next));
@@ -220,9 +229,9 @@ private:
             try {
                 if(command && command->operation==Operation::Deactivate) {
                     active=false;refresh_at=Clock::time_point::max();
-                    release_at=snapshot().release_when_hidden?Clock::now()+15s:Clock::time_point::max();
+                    release_at=releases()?Clock::now()+15s:Clock::time_point::max();
                     if(!speaker) publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";s.reason="released";});
-                } else if(command&&command->operation==Operation::Policy){release_at=!active&&snapshot().release_when_hidden?Clock::now()+15s:Clock::time_point::max();
+                } else if(command&&command->operation==Operation::Policy){release_at=!active&&releases()?Clock::now()+15s:Clock::time_point::max();
                 } else if(command&&(command->operation==Operation::Suspend||command->operation==Operation::Disconnect)){
                     suspended=command->operation==Operation::Suspend;speaker.reset();release_at=refresh_at=retry_at=Clock::time_point::max();retries=0;
                     publish([&](auto& s){s.ready=s.pending=s.fresh=false;s.status=suspended?"Sleeping":"Not connected";s.reason=suspended?"released":"off";s.error.clear();});
@@ -232,7 +241,7 @@ private:
                         speaker.reset();suspended=false;refresh_at=Clock::time_point::max();
                         drop_settings("Another speaker was chosen.");   // its last-known values were loaded by choose()
                     }
-                    if(command->operation==Operation::Reconnect){suspended=false;if(snapshot().address.empty()||(!active&&snapshot().release_when_hidden))continue;}
+                    if(command->operation==Operation::Reconnect){suspended=false;if(snapshot().address.empty()||(!active&&releases()))continue;}
                     else {active=true;release_at=Clock::time_point::max();}
                     if(suspended)continue;
                     if(!speaker) {
@@ -250,7 +259,7 @@ private:
                         read(*speaker);
                     }
                 } else if(command) {
-                    if(!speaker || !active) throw std::runtime_error("Controls are inactive. Open the widget and retry.");
+                    if(!speaker || !active) throw Rejected("Controls are inactive. Open the app or the widget and try again.");
                     execute(*speaker,*command);
                     report(command->id,true);
                 }
@@ -280,6 +289,11 @@ private:
                 if(link_grace>0&&retries<std::size(retry_delays)){--link_grace;retry_at=Clock::now()+retry_delays[retries++];}
                 else{retry_at=Clock::time_point::max();retries=0;link_grace=0;}
                 publish([](auto& s){s.ready=false;s.pending=false;s.fresh=false;s.status="Not connected";s.reason="off";s.error.clear();});
+            } catch(const Rejected& error) {
+                if(command)report(command->id,false,error.what());
+                bool pending;
+                {std::lock_guard lock(mutex_);pending=!commands_.empty();}
+                publish([&](auto& s){s.pending=pending;});
             } catch(const std::exception& error) {
                 speaker.reset();refresh_at=Clock::time_point::max();
                 if(command)report(command->id,false,error.what());

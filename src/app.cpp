@@ -156,8 +156,14 @@ public:
     HWND dialog{};                                  // native window that needs dialog keyboard handling
     bool web_failed{};
     std::deque<std::pair<Command,Clock::time_point>> waiting; // page writes held while a refresh runs
+    // Worker threads (update check, download, startup task) check this before posting back.
+    std::shared_ptr<std::atomic<bool>> alive=std::make_shared<std::atomic<bool>>(true);
+    bool library_error{},library_backed_up{};       // profiles.json could not be read; its start-of-session copy was made
+    Clock::time_point tray_until{};                 // the tray menu was used: the speaker's controls stay open until then
+    int tray_wanted=-1;Clock::time_point tray_wanted_until{};   // a tray button picked before the speaker linked
+    DWORD tray_menu_closed{};                       // tick when the tray menu last closed (one click can arrive twice)
     App():folder(data_folder()){}
-    ~App(){spectrum.stop();web.reset();if(in_tray){auto data=tray_data();Shell_NotifyIconW(NIM_DELETE,&data);}if(tray_window)DestroyWindow(tray_window);if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
+    ~App(){*alive=false;spectrum.stop();web.reset();if(in_tray){auto data=tray_data();Shell_NotifyIconW(NIM_DELETE,&data);}if(tray_window)DestroyWindow(tray_window);if(power_notification)UnregisterSuspendResumeNotification(power_notification);if(interface_notification)UnregisterDeviceNotification(interface_notification);for(auto [radio,notice]:radio_notifications){if(notice)UnregisterDeviceNotification(notice);CloseHandle(radio);}SetEvent(stop_pipe);if(pipe_thread.joinable())pipe_thread.join();native.reset();controller.reset();if(dispatcher)DestroyWindow(dispatcher);CloseHandle(stop_pipe);}
     void post(std::function<void()> fn){ {std::lock_guard lock(dispatch_mutex);tasks.push_back(std::move(fn));}PostMessageW(dispatcher,AppDispatchMessage,0,0); }
     void dispatch(){std::deque<std::function<void()>> work;{std::lock_guard lock(dispatch_mutex);work.swap(tasks);}for(auto& fn:work){try{fn();}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}catch(const std::exception& e){diagnostic(e.what());}}}
     void diagnostic(const std::string& text){if(!logging)return;try{auto path=folder/L"diagnostics.log";std::error_code ec;bool reset=std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)>5*1024*1024;
@@ -188,7 +194,10 @@ public:
         if(show)open(page);
         SetTimer(dispatcher,1,30000,nullptr);
     }
-    void interest(){bool active=editor!=nullptr&&IsWindowVisible(editor);for(auto& [id,widget]:widgets)active|=widget.active;controller->interest(active);}
+    void interest(){bool active=editor!=nullptr&&IsWindowVisible(editor);
+        controller->release_always(editor!=nullptr&&!IsWindowVisible(editor));for(auto& [id,widget]:widgets)active|=widget.active;
+        active|=Clock::now()<tray_until;   // the tray menu's buttons need the controls for a moment
+        controller->interest(active);}
     void recover(){
         // The board keeps the last card across provider restarts; start from it so an unchanged card is not resent.
         try{for(auto info:wp::WidgetManager::GetDefault().GetWidgetInfos()){auto context=info.WidgetContext();auto& record=widgets[std::wstring(context.Id())];
@@ -231,7 +240,7 @@ public:
         }
     }
     void changed(){
-        auto state=controller->snapshot();update_widgets();flush_waiting();refresh_editor();
+        auto state=controller->snapshot();update_widgets();flush_waiting();refresh_editor();tray_play();
         if(state.checked&&!state.pending)save(state);
         if(!state.error.empty())diagnostic(state.error);
         maybe_exit();
@@ -300,7 +309,7 @@ public:
     void open_web(){
         wchar_t module[32768]{};auto count=GetModuleFileNameW(nullptr,module,32768);
         auto content=std::filesystem::path(std::wstring(module,count)).parent_path()/L"app";
-        if(!std::filesystem::exists(content/L"index.html"))throw std::runtime_error("The Sound Lab files are missing from the package.");
+        if(!std::filesystem::exists(content/L"index.html"))throw std::runtime_error("The app's files are missing from the package.");
         // The page's last theme, so the window does not flash the other colour before it paints.
         std::string theme;{std::ifstream in(folder/L"theme",std::ios::binary);std::getline(in,theme);}
         web=std::make_unique<WebViewHost>(content,folder/L"WebView2",theme=="dark");
@@ -338,19 +347,49 @@ public:
         if(want&&!in_tray){auto data=tray_data();in_tray=Shell_NotifyIconW(NIM_ADD,&data);if(in_tray)Shell_NotifyIconW(NIM_SETVERSION,&data);}
         else if(!want&&in_tray){auto data=tray_data();Shell_NotifyIconW(NIM_DELETE,&data);in_tray=false;}
     }
+    // Opening from the tray: Windows sometimes gives the focus back to the taskbar just after the
+    // click, so the window is brought forward again a moment later (timer 3).
+    void open_from_tray(){open(0);SetTimer(dispatcher,3,250,nullptr);}
+    static std::wstring menu_text(const std::string& text){std::wstring out;for(wchar_t c:std::wstring(winrt::to_hstring(text))){out+=c;if(c==L'&')out+=c;}return out;}
+    // The menu: the speaker and its battery, the widget's six buttons (the one playing is ticked), Open, Quit.
+    // The window is hidden, so the speaker's controls may have been let go: opening the menu opens them
+    // again for a short while (tray_until), and a button picked before the link is up plays once it is.
     void tray_event(UINT event){
-        if(event==NIN_SELECT||event==NIN_KEYSELECT||event==WM_LBUTTONUP){open(0);return;}
+        if(event==NIN_SELECT||event==NIN_KEYSELECT||event==WM_LBUTTONUP){open_from_tray();return;}   // opening twice is harmless
         if(event!=WM_CONTEXTMENU&&event!=WM_RBUTTONUP)return;
-        HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"Open Tribit Connect");AppendMenuW(menu,MF_STRING,2,L"Quit");
+        // A right-click can arrive as both messages; the second must not reopen the menu just closed.
+        if(GetTickCount()-tray_menu_closed<300)return;
+        auto s=controller->snapshot();const bool linked=s.ready&&s.fresh,known=!s.address.empty();
+        if(known){tray_until=Clock::now()+25s;interest();SetTimer(dispatcher,4,26000,nullptr);}
+        std::string name="XSound Plus 2";for(auto& sp:widget_speakers)if(sp.in_use)name=sp.name;
+        std::wstring head=menu_text(name)+(!known?L"":linked?(s.battery>=0?L"  \u00B7  "+std::to_wstring(s.battery)+L"%":L""):
+            s.battery>=0?L"  \u00B7  not connected, "+std::to_wstring(s.battery)+L"% when last seen":L"  \u00B7  not connected");
+        HMENU menu=CreatePopupMenu();
+        AppendMenuW(menu,MF_STRING|MF_DISABLED,0,(known?head:std::wstring(L"No speaker chosen")).c_str());
+        AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+        for(size_t i=0;i<widget_slots.size();++i){auto& slot=widget_slots[i];
+            AppendMenuW(menu,MF_STRING|(known?0:MF_GRAYED)|(linked&&same_eq(s.preset,s.bands,slot)?MF_CHECKED:0),10+i,menu_text(slot.name).c_str());}
+        AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
+        AppendMenuW(menu,MF_STRING,1,L"Open Tribit Connect");AppendMenuW(menu,MF_STRING,2,L"Quit");
         POINT at{};GetCursorPos(&at);SetForegroundWindow(tray_window);
-        const int picked=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON,at.x,at.y,0,tray_window,nullptr);DestroyMenu(menu);
-        if(picked==1)open(0);
+        const int picked=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_RIGHTBUTTON,at.x,at.y,0,tray_window,nullptr);DestroyMenu(menu);tray_menu_closed=GetTickCount();
+        PostMessageW(tray_window,WM_NULL,0,0);   // lets the menu close properly when nothing was picked
+        if(picked==1)open_from_tray();
         else if(picked==2&&web&&web->window){quitting=true;PostMessageW(web->window,WM_CLOSE,0,0);}
+        else if(picked>=10&&picked<10+static_cast<int>(widget_slots.size())){tray_wanted=picked-10;tray_wanted_until=Clock::now()+15s;tray_play();}
+    }
+    // Plays the tray button that was picked, as soon as the speaker can take it.
+    void tray_play(){
+        if(tray_wanted<0)return;
+        if(Clock::now()>tray_wanted_until){tray_wanted=-1;return;}
+        auto s=controller->snapshot();if(!s.ready||!s.fresh||s.pending)return;
+        const int index=tray_wanted;tray_wanted=-1;
+        if(auto command=setting_command(s,L"eq.slot."+std::to_wstring(index),widget_slots))controller->send(*command);
     }
     // Start with Windows is the package's startup task, which Windows owns: read it, or ask to change it,
     // off the UI thread, then show what Windows says (it can refuse, e.g. when turned off in Settings > Apps > Startup).
     void query_startup(std::optional<bool> want){
-        std::thread([this,want]{
+        std::thread([this,want,alive=alive]{
             winrt::init_apartment(winrt::apartment_type::multi_threaded);
             using winrt::Windows::ApplicationModel::StartupTask;using winrt::Windows::ApplicationModel::StartupTaskState;
             std::wstring state=L"unavailable";   // not packaged (a development build)
@@ -358,7 +397,7 @@ public:
                 if(want){if(*want)s=task.RequestEnableAsync().get();else{task.Disable();s=task.State();}}
                 state=s==StartupTaskState::Enabled?L"on":s==StartupTaskState::EnabledByPolicy?L"policy-on":s==StartupTaskState::DisabledByPolicy?L"policy-off":
                     s==StartupTaskState::DisabledByUser?L"user-off":L"off";}catch(...){}
-            post([this,state]{startup=state;refresh_editor();});
+            if(*alive)post([this,state]{startup=state;refresh_editor();});
         }).detach();
     }
     void refresh_editor(){if(native)native->refresh();if(web&&web->window)web->post(state_json());}
@@ -369,7 +408,20 @@ public:
         return true;
     }
     // Everything the page shows, in the same shape the browser mock sends.
-    std::wstring state_json(){
+    static bool developer_mode(){
+        DWORD value=0,size=sizeof(value);
+        return RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock",L"AllowDevelopmentWithoutDevLicense",RRF_RT_REG_DWORD,nullptr,&value,&size)==ERROR_SUCCESS&&value==1;
+    }
+    // Is the widget on the board? Asked of Windows at most every few seconds (state goes out often).
+    bool widget_added(){
+        if(!widgets.empty())return true;
+        if(Clock::now()<widget_asked+5s)return widget_known;
+        widget_asked=Clock::now();
+        try{widget_known=wp::WidgetManager::GetDefault().GetWidgetInfos().size()>0;}catch(...){widget_known=false;}
+        return widget_known;
+    }
+    Clock::time_point widget_asked{};bool widget_known{};
+    std::wstring state_json(bool with_library=false){
         auto s=controller->snapshot();const bool connected=s.ready&&s.fresh;
         std::wstring status=s.pending&&!connected?L"connecting":connected&&s.pending?L"updating":connected?L"connected":
             (s.status=="Bluetooth unavailable"||!s.error.empty())?L"unavailable":L"disconnected";
@@ -402,6 +454,9 @@ public:
         settings.SetNamedValue(L"chosen",JsonValue::CreateBooleanValue(chosen));
         settings.SetNamedValue(L"checkUpdates",JsonValue::CreateBooleanValue(check_updates));
         settings.SetNamedValue(L"tray",JsonValue::CreateBooleanValue(tray));
+        // For the widget's two steps in Settings: Windows shows a widget from outside the Store only in Developer Mode.
+        settings.SetNamedValue(L"devMode",JsonValue::CreateBooleanValue(developer_mode()));
+        settings.SetNamedValue(L"widgetAdded",JsonValue::CreateBooleanValue(widget_added()));
         settings.SetNamedValue(L"startup",JsonValue::CreateStringValue(startup));
         settings.SetNamedValue(L"version",JsonValue::CreateStringValue(app_version()));
         JsonObject update;update.SetNamedValue(L"state",JsonValue::CreateStringValue(update_state));update.SetNamedValue(L"version",JsonValue::CreateStringValue(update_version));
@@ -409,17 +464,29 @@ public:
         JsonObject root;
         root.SetNamedValue(L"type",JsonValue::CreateStringValue(L"state"));
         root.SetNamedValue(L"speaker",speaker);root.SetNamedValue(L"settings",settings);
-        root.SetNamedValue(L"library",read_library());
+        // The library goes to the page once, in the reply to `ready`; it is the page's from then on.
+        if(with_library){
+            root.SetNamedValue(L"library",read_library());
+            if(library_error)root.SetNamedValue(L"libraryError",JsonValue::CreateBooleanValue(true));
+        }
         return std::wstring(root.Stringify());
     }
-    JsonValue read_library()const{
+    // null when there is no library yet. A file that is there but cannot be used (unreadable, cut short,
+    // not a JSON object, or absurdly large) is a different thing: it is copied aside as
+    // profiles.bad-<time>.json and library_error is set, so the page does not start a new library
+    // over the user's profiles.
+    JsonValue read_library(){
+        std::error_code ec;auto path=library_path();
+        if(!std::filesystem::exists(path,ec))return JsonValue::CreateNullValue();
         try{
-            std::error_code ec;auto path=library_path();
-            if(std::filesystem::exists(path,ec)&&std::filesystem::file_size(path,ec)<(1u<<20)){
+            if(std::filesystem::file_size(path)<(8u<<20)){
                 std::ifstream in(path,std::ios::binary);std::string text{std::istreambuf_iterator<char>(in),{}};
-                JsonValue parsed{nullptr};if(JsonValue::TryParse(winrt::to_hstring(text),parsed))return parsed;
+                JsonValue parsed{nullptr};
+                if(in&&JsonValue::TryParse(winrt::to_hstring(text),parsed)&&parsed.ValueType()==JsonValueType::Object){library_error=false;return parsed;}
             }
         }catch(...){}
+        if(!library_error){library_error=true;diagnostic("profiles.json could not be read; kept a copy as profiles.bad");
+            std::filesystem::copy_file(path,folder/(L"profiles.bad-"+std::to_wstring(tribit::updates::now_seconds())+L".json"),std::filesystem::copy_options::skip_existing,ec);}
         return JsonValue::CreateNullValue();
     }
     // Sound Lab saves the widget's buttons with the library, already resolved to names and curves.
@@ -451,7 +518,8 @@ public:
     void submit(Command c){
         if(controller->send(c))return;
         auto s=controller->snapshot();
-        if(s.ready&&s.fresh&&s.pending&&waiting.size()<8){waiting.push_back({std::move(c),Clock::now()+4s});return;}
+        // The timer ends a wait even if no state change arrives to flush it.
+        if(s.ready&&s.fresh&&s.pending&&waiting.size()<8){waiting.push_back({std::move(c),Clock::now()+4s});SetTimer(dispatcher,2,1000,nullptr);return;}
         web_result(c.id,false,s.ready&&s.fresh?"The speaker is busy. Try again.":"The speaker is not connected.");
     }
     void flush_waiting(){
@@ -461,22 +529,38 @@ public:
             if(!controller->send(c))break;
             waiting.pop_front();
         }
+        if(waiting.empty())KillTimer(dispatcher,2);
     }
     void save_library(const std::wstring& json){
         try{
+            // profiles.bak: the library as it was when this session first saved, if it was readable.
+            if(!library_backed_up){library_backed_up=true;std::error_code ec;
+                if(!library_error&&std::filesystem::exists(library_path(),ec))std::filesystem::copy_file(library_path(),folder/L"profiles.bak",std::filesystem::copy_options::overwrite_existing,ec);}
             auto temporary=folder/L"profiles.tmp";
-            {std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out<<winrt::to_string(json);if(!out)throw std::runtime_error("Could not save profiles.");}
+            {std::ofstream out(temporary,std::ios::binary|std::ios::trunc);out<<winrt::to_string(json);out.flush();if(!out)throw std::runtime_error("Could not save profiles.");}
             if(!MoveFileExW(temporary.c_str(),library_path().c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH))winrt::throw_last_error();
         }catch(const std::exception& e){diagnostic(e.what());}catch(const winrt::hresult_error& e){diagnostic(winrt::to_string(e.message()));}
     }
+    // Every request (a message with an id) gets a result, including one this code could not make sense
+    // of: without it the page would wait for an answer that never comes.
     void web_message(const std::wstring& text){
         JsonObject m{nullptr};if(!JsonObject::TryParse(text,m))return;
-        const std::wstring type(m.GetNamedString(L"type",L""));const int id=static_cast<int>(m.GetNamedNumber(L"id",0));
-        if(type==L"ready"){web->page_ready();web->post(state_json());return;}
+        int id=0;try{id=static_cast<int>(m.GetNamedNumber(L"id",0));}catch(...){}
+        try{handle_message(m,id);}
+        catch(const winrt::hresult_error& e){diagnostic("page message: "+winrt::to_string(e.message()));web_result(id,false,"The request was not understood.");}
+        catch(const std::exception& e){diagnostic(std::string("page message: ")+e.what());web_result(id,false,"The request was not understood.");}
+    }
+    static bool bands_in_range(const Bands& bands){return std::all_of(bands.begin(),bands.end(),[](int b){return b>=-8&&b<=8;});}
+    void handle_message(const JsonObject& m,int id){
+        const std::wstring type(m.GetNamedString(L"type",L""));
+        if(type==L"ready"){web->page_ready();web->post(state_json(true));return;}
+        // A script error on the page, for the diagnostic log (written only while it is switched on).
+        if(type==L"log"){diagnostic("page: "+tribit::narrow(std::wstring(m.GetNamedString(L"text",L"")).substr(0,1500)));return;}
         if(type==L"window"){web->command(std::wstring(m.GetNamedString(L"action",L"")));return;}
         if(type==L"apply"){
             Command c{Operation::Preset};c.id=id;const int preset=static_cast<int>(m.GetNamedNumber(L"preset",-1));
-            if(preset==tribit::Custom){c.operation=Operation::CustomEq;if(!read_bands(m,c.bands)){web_result(id,false,"No bands were given.");return;}}
+            if(preset==tribit::Custom){c.operation=Operation::CustomEq;if(!read_bands(m,c.bands)||!bands_in_range(c.bands)){web_result(id,false,"That curve cannot be played.");return;}}
+            else if(!valid_preset(preset)){web_result(id,false,"Unknown program.");return;}
             else c.value=preset;
             submit(std::move(c));return;
         }
@@ -485,18 +569,22 @@ public:
             if(slots.Size()!=3){web_result(id,false,"Three lights are needed.");return;}
             for(uint32_t i=0;i<3;++i){
                 auto slot=slots.GetObjectAt(i);c.buttons[i]=static_cast<int>(slot.GetNamedNumber(L"preset",-1));
-                if(c.buttons[i]==tribit::Custom&&!read_bands(slot,c.button_bands[i])){web_result(id,false,"No bands were given.");return;}
+                if(c.buttons[i]==tribit::Custom?(!read_bands(slot,c.button_bands[i])||!bands_in_range(c.button_bands[i])):!valid_preset(c.buttons[i])){web_result(id,false,"A light holds something that cannot be written back. Try again in a moment.");return;}
             }
             submit(std::move(c));return;
         }
-        if(type==L"setPrompt"){Command c{Operation::Prompt};c.id=id;c.index=static_cast<int>(m.GetNamedNumber(L"index",-1));c.value=m.GetNamedBoolean(L"value",false)?1:0;submit(std::move(c));return;}
+        if(type==L"setPrompt"){Command c{Operation::Prompt};c.id=id;c.index=static_cast<int>(m.GetNamedNumber(L"index",-1));if(c.index<0||c.index>4){web_result(id,false,"Unknown beep.");return;}c.value=m.GetNamedBoolean(L"value",false)?1:0;submit(std::move(c));return;}
         if(type==L"setAutoShutdown"){Command c{Operation::AutoShutdown};c.id=id;c.value=m.GetNamedBoolean(L"value",false)?1:0;submit(std::move(c));return;}
         if(type==L"setRelease"){release(m.GetNamedBoolean(L"value",false));update_widgets();refresh_editor();return;}
         if(type==L"setLogging"){logging=m.GetNamedBoolean(L"value",false);save(controller->snapshot());update_widgets();refresh_editor();return;}
         if(type==L"saveLibrary"){if(m.HasKey(L"library")){auto library=m.GetNamedValue(L"library");save_library(std::wstring(library.Stringify()));load_widget_slots(library);update_widgets();}return;}
         // Settings > Remove my data: profiles, settings and the log go; the page has already reset itself.
         if(type==L"removeData"){std::error_code ec;
-            for(auto name:{L"profiles.json",L"profiles.tmp",L"state.json",L"state.tmp",L"theme",L"diagnostics.log"})std::filesystem::remove(folder/name,ec);
+            for(auto name:{L"profiles.json",L"profiles.tmp",L"profiles.bak",L"state.json",L"state.tmp",L"theme",L"diagnostics.log"})std::filesystem::remove(folder/name,ec);
+            std::vector<std::filesystem::path> aside;
+            for(auto& entry:std::filesystem::directory_iterator(folder,ec))if(entry.path().filename().wstring().starts_with(L"profiles.bad-"))aside.push_back(entry.path());
+            for(auto& path:aside)std::filesystem::remove(path,ec);
+            library_error=false;library_backed_up=true;
             logging=false;chosen=false;check_updates=true;last_update_check=0;tray=false;memory=JsonObject();update_tray();
             load_widget_slots(JsonValue::CreateNullValue());update_widgets();refresh_editor();return;}
         if(type==L"theme"){const bool dark=m.GetNamedBoolean(L"dark",false);web->theme(dark);
@@ -517,6 +605,7 @@ public:
         if(type==L"setTray"){tray=m.GetNamedBoolean(L"value",false);save(controller->snapshot());update_tray();refresh_editor();return;}
         if(type==L"setStartup"){query_startup(m.GetNamedBoolean(L"value",false));return;}
         if(type==L"installUpdate"){install_update();return;}
+        if(type==L"openDeveloper"){ShellExecuteW(nullptr,L"open",L"ms-settings:developers",nullptr,nullptr,SW_SHOWNORMAL);return;}
         if(type==L"openBluetooth"){ShellExecuteW(nullptr,L"open",L"ms-settings:bluetooth",nullptr,nullptr,SW_SHOWNORMAL);return;}
         // The add-your-speaker site (repo tribit-connect-submit). Only this fixed address is opened.
         // An optional model name rides along as ?model=, percent-encoded; nothing else is added.
@@ -545,33 +634,51 @@ public:
         if(!force&&(!check_updates||now_seconds()-last_update_check<24*3600))return;
         last_update_check=now_seconds();save(controller->snapshot());
         set_update(L"checking");const int seq=++update_seq;
-        std::thread([this,cur=*current,seq]{
+        std::thread([this,cur=*current,seq,alive=alive]{
             winrt::init_apartment(winrt::apartment_type::multi_threaded);
             const auto started=Clock::now();
             std::optional<Release> release;bool failed=false;
-            try{release=newer_release(latest_json().get(),cur);}catch(...){failed=true;}   // offline or rate-limited
+            try{release=newer_release(within(latest_json(),20s),cur);}catch(...){failed=true;}   // offline, rate-limited or too slow
             // Long enough to read "Checking…", so a second Check now visibly happens.
             std::this_thread::sleep_until(started+700ms);
+            if(!*alive)return;
             post([this,release,failed]{available=release;set_update(failed?L"failed":release?L"available":L"current",release?release->version:L"");});
             // Then the key goes back to "Check now", ready for another look (an offer stays until used).
             if(release)return;
             std::this_thread::sleep_for(4s);
+            if(!*alive)return;
             post([this,seq]{if(seq==update_seq&&(update_state==L"current"||update_state==L"failed"))set_update(L"idle");});
         }).detach();
+    }
+    // A request's result, or an exception once `limit` has passed (the request is cancelled).
+    template<class Async> static auto within(Async operation,std::chrono::seconds limit){
+        if(operation.wait_for(limit)!=winrt::Windows::Foundation::AsyncStatus::Completed){operation.Cancel();throw std::runtime_error("The request took too long.");}
+        return operation.GetResults();
     }
     int update_seq{};   // the latest check, so an older one's reset never clears a newer result
     void install_update(){
         if(!available||update_state==L"downloading"||update_state==L"installing")return;
         set_update(L"downloading",available->version);
-        std::thread([this,release=*available]{
+        std::thread([this,release=*available,alive=alive]{
             winrt::init_apartment(winrt::apartment_type::multi_threaded);
-            winrt::hstring setup;try{setup=tribit::updates::download(release).get();}catch(...){}
-            post([this,setup,version=release.version]{
+            winrt::hstring setup;try{setup=within(tribit::updates::download(release),120s);}catch(...){}
+            // From here until it runs, nothing else may write the file: it is held open without write
+            // sharing, and its signature is checked again under that hold.
+            HANDLE hold=INVALID_HANDLE_VALUE;
+            if(!setup.empty()){hold=CreateFileW(setup.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+                if(hold==INVALID_HANDLE_VALUE||!tribit::updates::signed_by_us(std::filesystem::path(std::wstring(setup)))){if(hold!=INVALID_HANDLE_VALUE)CloseHandle(hold);hold=INVALID_HANDLE_VALUE;setup=L"";}}
+            if(!*alive){if(hold!=INVALID_HANDLE_VALUE)CloseHandle(hold);return;}
+            post([this,setup,hold,version=release.version]{
                 if(setup.empty()){set_update(L"unverified",version);return;}
                 set_update(L"installing",version);
-                // Setup closes this app and the widget for the moment it takes, then reopens Sound Lab.
-                ShellExecuteW(nullptr,L"open",setup.c_str(),L"/update",nullptr,SW_SHOWNORMAL);
+                // Setup closes this app and the widget for the moment it takes, then reopens the app.
+                const auto started=reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",setup.c_str(),L"/update",nullptr,SW_SHOWNORMAL));
+                CloseHandle(hold);
+                if(started<=32)set_update(L"stalled",version);
             });
+            // Setup ends this process within moments. Still here after a minute: it did not go through.
+            std::this_thread::sleep_for(60s);
+            if(*alive)post([this,version=release.version]{if(update_state==L"installing")set_update(L"stalled",version);});
         }).detach();
     }
     // Switch to another paired speaker (Speakers page or widget), showing what it last reported.
@@ -678,6 +785,9 @@ public:
             // Explorer restarting clears every tray icon; put ours back.
             static const UINT taskbar_created=RegisterWindowMessageW(L"TaskbarCreated");
             if(message==taskbar_created&&window==self->tray_window){self->in_tray=false;self->update_tray();return 0;}
+            if(message==WM_TIMER&&window==self->dispatcher&&wparam==2){self->flush_waiting();return 0;}
+            if(message==WM_TIMER&&window==self->dispatcher&&wparam==3){KillTimer(window,3);if(self->web&&self->web->visible())self->web->front();return 0;}
+            if(message==WM_TIMER&&window==self->dispatcher&&wparam==4){KillTimer(window,4);self->interest();return 0;}
             if(message==WM_TIMER&&window==self->dispatcher){KillTimer(window,1);self->maybe_exit();return 0;}
         }catch(const winrt::hresult_error& e){self->diagnostic(winrt::to_string(e.message()));}catch(const std::exception& e){self->diagnostic(e.what());}
         return DefWindowProcW(window,message,wparam,lparam);

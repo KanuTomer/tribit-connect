@@ -14,6 +14,8 @@
 #include <shellapi.h>
 #include <urlmon.h>
 #include <wincrypt.h>
+#include <wintrust.h>
+#include <softpub.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Management.Deployment.h>
@@ -51,9 +53,11 @@ static bool trusted(const std::vector<BYTE>& cer){
     bool found=false;if(store){PCCERT_CONTEXT hit=CertFindCertificateInStore(store,X509_ASN_ENCODING,0,CERT_FIND_EXISTING,cert,nullptr);found=hit!=nullptr;if(hit)CertFreeCertificateContext(hit);CertCloseStore(store,0);}
     CertFreeCertificateContext(cert);return found;
 }
-// The elevated half: add the certificate to LocalMachine\TrustedPeople.
-static int trust(const fs::path& cer_path){
-    std::ifstream in(cer_path,std::ios::binary);std::vector<BYTE> cer{std::istreambuf_iterator<char>(in),{}};
+// The elevated half: add the certificate to LocalMachine\TrustedPeople. It is always the certificate
+// built into this file, never one read from a path: a file in the temp folder could be swapped before
+// the elevated copy reads it, and `--trust <any file>` would make this signed setup trust anything.
+static int trust(){
+    std::vector<BYTE> cer;try{cer=resource(kPayloadCer);}catch(...){return 4;}
     HCERTSTORE store=CertOpenStore(CERT_STORE_PROV_SYSTEM_W,0,0,CERT_SYSTEM_STORE_LOCAL_MACHINE,L"TrustedPeople");if(!store)return 2;
     BOOL ok=CertAddEncodedCertificateToStore(store,X509_ASN_ENCODING,cer.data(),static_cast<DWORD>(cer.size()),CERT_STORE_ADD_REPLACE_EXISTING,nullptr);
     CertCloseStore(store,0);return ok?0:3;
@@ -78,6 +82,17 @@ static DWORD run_and_wait(const std::wstring& file,const std::wstring& args,bool
     WaitForSingleObject(info.hProcess,INFINITE);DWORD code=1;GetExitCodeProcess(info.hProcess,&code);CloseHandle(info.hProcess);return code;
 }
 
+// A downloaded installer runs only if Windows fully trusts its signature (a Microsoft-signed file does).
+static bool trusted_signature(const fs::path& file){
+    WINTRUST_FILE_INFO info{sizeof(info)};info.pcwszFilePath=file.c_str();
+    GUID action=WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    WINTRUST_DATA data{sizeof(data)};
+    data.dwUIChoice=WTD_UI_NONE;data.fdwRevocationChecks=WTD_REVOKE_NONE;data.dwUnionChoice=WTD_CHOICE_FILE;data.pFile=&info;data.dwStateAction=WTD_STATEACTION_VERIFY;
+    const LONG status=WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE),&action,&data);
+    data.dwStateAction=WTD_STATEACTION_CLOSE;WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE),&action,&data);
+    return status==ERROR_SUCCESS;
+}
+
 // ---- the dialog: one progress page, then a result page -------------------------------------------
 struct Setup {
     HWND dialog{};std::wstring error;bool done{};
@@ -100,6 +115,7 @@ struct Setup {
                 step(L"Downloading the Windows App Runtime from Microsoft…");
                 auto exe=folder/L"windowsappruntimeinstall-x64.exe";
                 if(FAILED(URLDownloadToFileW(nullptr,kRuntimeUrl,exe.c_str(),0,nullptr)))throw std::runtime_error("Could not download the Windows App Runtime. Check the internet connection and run setup again.");
+                if(!trusted_signature(exe))throw std::runtime_error("The Windows App Runtime download could not be verified. Run setup again.");
                 step(L"Installing the Windows App Runtime…");
                 if(run_and_wait(exe.wstring(),L"--quiet",false,dialog)!=0&&!runtime_present())throw std::runtime_error("The Windows App Runtime could not be installed.");
             }
@@ -146,7 +162,7 @@ static HRESULT CALLBACK progress_proc(HWND hwnd,UINT msg,WPARAM,LPARAM,LONG_PTR)
 
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,PWSTR,int){
     int argc=0;LPWSTR* argv=CommandLineToArgvW(GetCommandLineW(),&argc);
-    if(argc==3&&std::wstring(argv[1])==L"--trust")return trust(argv[2]);
+    if(argc==3&&std::wstring(argv[1])==L"--trust")return trust();   // the path is ignored (older callers pass one)
     if(argc==3&&std::wstring(argv[1])==L"--check"){
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         std::wofstream out(argv[2]);

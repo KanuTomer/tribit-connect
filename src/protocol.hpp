@@ -14,6 +14,7 @@ using Bytes=std::vector<uint8_t>;
 inline constexpr std::array<uint8_t,5> kHostHeader{0x08,0xEE,0x00,0x00,0x00};
 inline constexpr std::array<uint8_t,5> kSpeakerHeader{0x09,0xFF,0x00,0x00,0x01};
 inline constexpr size_t kOverhead=10; // header(5) 01 cmd len_lo len_hi ... sum
+inline constexpr size_t kMaxFrame=1024; // far above any frame the speaker sends
 inline constexpr uint8_t kRfcommChannel=3;
 
 enum Command:uint8_t{
@@ -64,7 +65,9 @@ public:
             discard(static_cast<size_t>(start-buffer_.begin()));
             if(buffer_.size()<kOverhead)return std::nullopt;
             const size_t length=static_cast<size_t>(buffer_[7])|(static_cast<size_t>(buffer_[8])<<8);
-            if(buffer_[5]!=0x01||length<kOverhead){++rejected_;discard(1);continue;}
+            // Real frames are a few dozen bytes. A length beyond kMaxFrame is noise that happens to look
+            // like a header; waiting for that many bytes would hold up the real frames behind it.
+            if(buffer_[5]!=0x01||length<kOverhead||length>kMaxFrame){++rejected_;discard(1);continue;}
             if(buffer_.size()<length)return std::nullopt;
             if(checksum({buffer_.data(),length-1})!=buffer_[length-1]){++rejected_;discard(1);continue;}
             Frame frame{buffer_[6],Bytes(buffer_.begin()+9,buffer_.begin()+length-1)};

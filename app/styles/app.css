@@ -41,8 +41,13 @@
 html,body{height:100%;background:var(--ivory);color:var(--ink);font:14px/1.35 Archivo,system-ui,sans-serif;font-stretch:100%;overflow:hidden}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 button:disabled{cursor:not-allowed}
-button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
-.app{height:100vh;min-width:960px;min-height:620px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:58px minmax(0,1fr) 168px}
+/* The focus ring is for moving with Tab (.kbd, set in app.js), not for a key pressed after a click. */
+:focus-visible{outline:0}
+.kbd button:focus-visible,.kbd [tabindex]:focus-visible,input:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
+/* An instrument, not a document: nothing is selectable except where you type. */
+body{-webkit-user-select:none;user-select:none}
+input,textarea{-webkit-user-select:text;user-select:text}
+.app{--bank-h:168px;height:100vh;min-width:960px;min-height:620px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:58px minmax(0,1fr) var(--bank-h)}
 
 /* engraved legends: dark fill with a light lower edge, as if cut into the panel */
 .engr{font-weight:600;font-stretch:120%;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
@@ -62,21 +67,24 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 /* ‹ Speakers: back to the app's home (the Speakers page); only on a speaker's page */
 .plate-name{align-items:center}
 .plate-name .mech.back{height:30px;padding:0 12px;font-size:11px}
-.app.racked .mech.back,.app.booting .mech.back{display:none}
+.app.racked .mech.back,.app.booting .mech.back{display:none}   /* the way into a speaker is its card and Open */
+.plate-name .mech.back{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Speakers: laid out like the home page ─────────────────────────────────────
    The stage shows the speaker selected; the bank is a SPEAKERS selector, as on an amp (A, B, C…),
    one latching key per paired Tribit speaker. The title bar keeps only the app name and the window
    buttons: the battery, link and Settings belong to one speaker, and none is in use here. */
-.rack{grid-row:2/4;display:grid;grid-template-rows:minmax(0,1fr) 168px;min-height:0}
+.rack{grid-row:2/4;display:grid;grid-template-rows:minmax(0,1fr) var(--bank-h);min-height:0}
 .rack[hidden]{display:none}
-.app.racked .stage,.app.racked .surface,.app.racked>.bank,.app.racked .library{display:none}
+/* !important: the editor's own rule (.app.editing .surface{display:grid}) has the same weight and comes
+   later, so without it the editor stayed up beside this page. A page that hides others always wins. */
+.app.racked .stage,.app.racked .surface,.app.racked>.bank,.app.racked .library{display:none!important}
 /* No speaker is in use here: no battery or link. SETTINGS stays, for the app's own settings. */
-.app.racked .mini-speaker,.app.racked .instruments{display:none}
+.app.racked .instruments{display:none!important}
 /* Booting: until the first connect attempt settles, only the title bar shows, so the instrument
    never flashes before the Speakers page (and the page never flashes before the instrument). */
 .app.booting .stage,.app.booting .surface,.app.booting>.bank,.app.booting .library,.app.booting .instruments,
-.app.booting #deviceBtn,.app.booting .mini-speaker{visibility:hidden}
+.app.booting #deviceBtn{visibility:hidden}
 .pick{display:grid;place-items:center;align-content:center;gap:22px;padding:24px;overflow:hidden;background:var(--tex),var(--ivory);min-height:0}
 .pick-art{width:min(760px,60vw,calc((100vh - 400px) * 2.6));min-width:420px}
 .pick-art .speaker{width:100%;display:block;filter:drop-shadow(0 18px 22px #00000026)}
@@ -86,6 +94,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .pick-info{display:grid;justify-items:center;gap:12px;text-align:center}
 .pick-info h2{font-weight:700;font-stretch:125%;font-size:30px;letter-spacing:-.01em;line-height:1.1}
 .pick-info .state{display:flex;align-items:center;gap:8px}
+.pick-info .state .led.on{background:var(--blue-light);box-shadow:0 0 8px #3d8bffaa}
 .pick-info p{max-width:52ch;color:var(--ink-2);font-size:14px}
 .pick-info .acts{display:flex;gap:10px}
 .pick-info .mech{min-width:128px}
@@ -125,9 +134,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .bulb.busy{background:var(--amber);animation:blink 1s steps(2) infinite}
 .bulb.err{background:var(--orange)}
 @keyframes blink{50%{opacity:.25}}
-.mini-speaker{width:0;opacity:0;overflow:hidden;flex:none;transition:width .3s var(--ease),opacity .25s ease}
-.mini-speaker svg{width:96px}
-.app.editing .mini-speaker{width:96px;opacity:1}
 .winctl{display:flex;align-self:stretch}
 .winctl button{width:46px;display:grid;place-items:center;color:var(--ink-2)}
 .winctl button:hover{background:var(--hover);color:var(--ink)}.winctl .close:hover{background:#c42b1c;color:#fff}
@@ -188,11 +194,15 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .group.factory{flex:none}.group.user{flex:1}
 .group-label{font-size:10.5px;letter-spacing:.14em;font-weight:600;color:#8f8a7f;font-stretch:120%;display:flex;align-items:center;gap:8px}
 .group-label::after{content:"";flex:1;height:1px;background:#4a4945}
-.row{display:flex;gap:clamp(6px,.7vw,9px);padding:12px 0 4px;margin-top:-4px}
+/* 10px of headroom above the keys (taken back by the margin) so a lifted key and its lamp are not cut by
+   .userrow's overflow */
+.row{display:flex;gap:clamp(6px,.7vw,9px);padding:22px 0 4px;margin-top:-14px}
 .userrow{overflow:hidden;min-width:0}   /* pinned keys that do not fit are left out (fit()), never cut */
 .pkey{width:var(--kw,clamp(56px,4.9vw,80px));height:84px;border-radius:7px;background:var(--key);color:var(--key-ink);display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;padding:8px 8px 7px;position:relative;
   box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0006;transition:transform .08s var(--ease),box-shadow .08s,width .3s var(--ease);flex:none}
-.pkey.user{background:var(--key-user)}
+/* Every program key is ivory; only a program beyond the twelfth, visiting while it is edited, keeps the
+   older faded tan, so it is plainly not one of the bar's own keys. */
+.pkey.prog.visiting{background:var(--key-user)}
 /* a key being dragged: lifted above its neighbours, which glide aside; carried keys leave an empty slot */
 .pkey.held{z-index:5;cursor:grabbing;transition:none;box-shadow:0 3px 0 var(--key-edge),0 14px 24px #0008}
 .pkey.carried{position:fixed;margin:0;pointer-events:none}
@@ -205,8 +215,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .pkey .led{position:absolute;top:-11px;left:50%;width:14px;height:4px;margin-left:-7px;border-radius:2px;background:#4b4a46;box-shadow:none;transition:background .25s,box-shadow .25s}
 .pkey.playing .led{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .pkey.busy .led{background:var(--amber);animation:blink .5s steps(2) infinite}
-.pkey.editing{box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0006,inset 0 0 0 2px var(--orange)}
-.pkey.editing:active,.pkey.editing.down{box-shadow:0 0 0 var(--key-edge),inset 0 0 0 2px var(--orange)}
 /* an unsaved draft: a small amber lamp after the number */
 .pkey .dm{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px var(--amber);margin-left:5px;vertical-align:4px}
 .pkey .dot{position:absolute;right:7px;top:8px;display:flex;gap:3px}
@@ -329,7 +337,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .rec.playing .discwrap{transform:translate(-50%,-28px)}.rec.playing{--disc-label:var(--amber)}
 .rec.spinning .disc{animation:spin 8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
-.rec .sleeve{position:relative;display:flex;flex-direction:column;aspect-ratio:1/1.02;padding:9px 10px 9px;border-radius:4px;background:var(--key-user);color:var(--key-ink);
+.rec .sleeve{position:relative;display:flex;flex-direction:column;aspect-ratio:1/1.02;padding:9px 10px 9px;border-radius:4px;background:var(--key);color:var(--key-ink);
   box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0003,inset 0 2px 0 #0000001a;transition:transform .08s var(--ease),box-shadow .08s}
 .rec:active:not(.held) .sleeve{transform:translateY(3px);box-shadow:0 0 0 var(--key-edge),0 2px 4px #0003,inset 0 2px 0 #0000001a}
 .rec .n{font:700 clamp(20px,13cqw,30px)/1 Archivo;font-stretch:112%;letter-spacing:-.02em}
@@ -343,7 +351,6 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .rec .mini .c{stroke:#e6f6c6;stroke-width:1.7;stroke-linejoin:round}
 .rec .t{font-size:clamp(12px,7cqw,15px);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:26px}
 .rec .t.rolling{padding-right:0}
-.rec.editing .sleeve{box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0003,inset 0 0 0 2px var(--orange)}
 .rec.held{z-index:5;cursor:grabbing;transition:none}.rec.held .sleeve{box-shadow:0 3px 0 var(--key-edge),0 16px 26px #0006}
 .rec .dot{position:absolute;right:9px;bottom:10px;display:flex;gap:3px}.rec .dot i{width:7px;height:7px;border-radius:50%;border:1px solid #0004}
 .lib-empty{color:var(--ink-2);font-size:13px;padding:30px 0;text-align:center}
@@ -413,7 +420,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 .offline-card .engr{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink)}
 .offline-card p{font-size:12.5px;color:var(--ink-2);line-height:1.4}
 .offline-card .acts{display:flex;gap:8px;margin-top:2px}.offline-card .mech{white-space:nowrap}
-.app.offline .spk .speaker,.app.offline .mini-speaker svg{filter:grayscale(1) brightness(.85);opacity:.5}
+.app.offline .spk .speaker{filter:grayscale(1) brightness(.85);opacity:.5}
 .app.offline .lampkey .face{filter:grayscale(.9) brightness(.7);box-shadow:0 1px 0 #0003}
 .app.offline .lampkey,.app.offline .readout{cursor:not-allowed}
 .app.offline .readout{color:var(--lcd-dim)}
@@ -440,7 +447,7 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
 }
 @media (max-height:760px){.scale span.minor{display:none}}
 @media (max-height:700px){
-  .app{grid-template-rows:52px minmax(0,1fr) 150px}
+  .app{--bank-h:150px;grid-template-rows:52px minmax(0,1fr) var(--bank-h)}
   .pkey,.bigkey{height:72px}.pkey .n{font-size:21px}
   .unit .foot{margin-top:6px}.lampkey{width:52px;height:52px}
 }
@@ -481,3 +488,52 @@ button:focus-visible,[tabindex]:focus-visible,input:focus-visible{outline:2px so
   .pkey.playing,.pkey.editing,.unit.lit{outline:3px solid Highlight;outline-offset:-3px}
   .curve{stroke:Highlight}.cap{background:ButtonText}
 }
+/* a record whose write is on its way blinks its number, as its key blinks its lamp */
+.rec.busy .sleeve .n{animation:blink .5s steps(2) infinite}
+/* the way to the app's own settings, from a speaker's */
+.dv-more{display:flex;align-items:baseline;gap:10px;border-top:1px solid var(--rule);padding-top:10px}.dv-more .dv-link{font-size:12.5px;color:var(--ink-2)}
+
+/* ── 0.8.0: one list of programs ─────────────────────────────────────────────── */
+/* One column, always: pages that share cells (the library, the Speakers page) never push a second one. */
+.app>*{grid-column:1}
+/* The library is a page of its own: it covers the stage and the program bar. */
+.library{grid-row:2/4;z-index:5;margin:10px 14px 14px;padding:18px 22px 0;border-radius:14px;transform:translateY(calc(100% + 24px))}
+.lib-head .mech{margin-left:12px;height:32px}
+.library .crate-grid{grid-template-columns:repeat(6,minmax(0,1fr));gap:12px 18px;max-width:1240px;margin:0 auto;padding:0 8px}
+.rec.factory .sleeve{background:var(--key)}
+.rec .tag{position:absolute;right:9px;top:11px;font:600 9px Archivo;font-stretch:120%;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+/* what is behind the library steps back while it is up, and returns as it leaves */
+.stage>*,.surface>*,.bank>*{transition:opacity .25s ease,transform .15s ease}
+.app.lib-open .stage>*,.app.lib-open .surface>*,.app.lib-open>.bank>*{opacity:0}
+/* the EQ button on the drawing: no browser focus box; a ring for the keyboard */
+/* Only the home drawing's button is a control ([tabindex]); the Speakers page and the mini speaker are pictures. */
+.spk-eq{outline:0}
+.spk-eq[tabindex]{cursor:pointer}
+.kbd .spk-eq:focus-visible .spk-ring{stroke:var(--orange)}
+/* the editor's keys: DELETE arms first (pressed in, red lamp, CONFIRM), the second press deletes */
+.transport .mech.del.armed{transform:translateY(2px);background:linear-gradient(var(--mech-b),var(--mech-a));box-shadow:inset 0 1px 3px #0003}
+.transport .mech.del.armed .lamp{background:var(--high);box-shadow:0 0 8px var(--high)}
+.ctx .danger.armed{background:var(--high);color:#fff}
+/* Speakers page <-> a speaker's home page: the bottom bar's keys drop out with the page and the new ones
+   rise in, on the same timing as the rest (store.js transition: .leaving, then .arriving) */
+.app.swapping.leaving:not(.racked)>.bank>:not(.legend),.app.swapping.leaving.racked .spk-bank>:not(.legend){animation:sinkout .24s var(--ease) forwards}
+.app.swapping.arriving:not(.racked)>.bank>:not(.legend){animation:rise .45s var(--ease) both}
+.app.swapping.arriving:not(.racked)>.bank>:nth-child(2){animation-delay:.04s}.app.swapping.arriving:not(.racked)>.bank>:nth-child(3){animation-delay:.08s}
+/* The sideways legends are turned with transform, which a moving animation would replace (the word spun
+   round): they only fade. */
+.app.swapping.leaving .bank .legend{animation:fadeout .2s ease forwards}
+.app.swapping.arriving .bank .legend{animation:fadein .45s ease both}
+
+/* the widget's two steps in Settings */
+.steps{display:grid;gap:12px;margin-top:10px}
+.step{display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start}
+.step .no{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px Archivo;background:var(--well);color:var(--ink-2);box-shadow:inset 0 1px 2px #0003}
+.step.done .no{background:var(--orange);color:#fff}
+.step b{display:block;font-size:13px}.step small{display:block;font-size:11.5px;color:var(--ink-2);line-height:1.4;margin:2px 0 6px}
+.step .mech{height:28px;font-size:10.5px}
+.step .ok{font:600 10.5px Archivo;font-stretch:120%;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+/* pages arrive rather than cut: the cover lifting at launch, and Settings changing what it holds */
+.sheet.swap>*{animation:fadein .22s ease both}
+/* UNDO rests pressed in while there is nothing to undo and pops up when there is (never greyed out) */
+.transport .mech.undo{transition:transform .18s var(--ease),box-shadow .18s var(--ease),background .18s}
+.transport .mech.sunk{transform:translateY(2px);background:linear-gradient(var(--mech-b),var(--mech-a));box-shadow:inset 0 1px 3px #0003;cursor:default}

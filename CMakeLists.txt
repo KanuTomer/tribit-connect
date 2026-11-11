@@ -42,7 +42,7 @@ if(TRIBIT_BUILD_APP)
   target_include_directories(TribitConnectSetup BEFORE PRIVATE "${CMAKE_BINARY_DIR}/generated")
   target_compile_definitions(TribitConnectSetup PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
   target_compile_options(TribitConnectSetup PRIVATE /W4 /utf-8 /permissive-)
-  target_link_libraries(TribitConnectSetup PRIVATE windowsapp comctl32 crypt32 urlmon shell32 ole32)
+  target_link_libraries(TribitConnectSetup PRIVATE windowsapp comctl32 crypt32 wintrust urlmon shell32 ole32)
   set_target_properties(TribitConnectSetup PROPERTIES OUTPUT_NAME "TribitConnect-Setup" RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
   # Card exporter for the browser mock (scripts/mock.ps1); not part of the package.
