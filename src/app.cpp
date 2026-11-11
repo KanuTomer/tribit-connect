@@ -410,7 +410,7 @@ public:
     // Everything the page shows, in the same shape the browser mock sends.
     static bool developer_mode(){
         DWORD value=0,size=sizeof(value);
-        return RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock",L"AllowDevelopmentWithoutDevLicense",RRF_RT_REG_DWORD,nullptr,&value,&size)==ERROR_SUCCESS&&value==1;
+        return RegGetValueW(HKEY_LOCAL_MACHINE,L"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\AppModelUnlock",L"AllowDevelopmentWithoutDevLicense",RRF_RT_REG_DWORD,nullptr,&value,&size)==ERROR_SUCCESS&&value==1;
     }
     // Is the widget on the board? Asked of Windows at most every few seconds (state goes out often).
     bool widget_added(){

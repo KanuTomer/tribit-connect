@@ -58,22 +58,47 @@ try{
   check('a factory program opens in the editor',ed().key===factory.key&&playing()===factory.name,playing());
   const s2=q('#channels [data-band="3"]');s2.focus();key(s2,'ArrowUp');await wait(900);
   check('changing it makes a copy and edits that',S().programs().length===programs+1&&ed().name==='My '+factory.name&&!ed().factory,ed().name);
-  click(q('[data-do=del]'));await wait(400);
-  check('Delete removes the copy and moves on',S().programs().length===programs&&!!q('#keys .pkey.editing'));
-  click($('editKey'));await wait(900);
-  check('DONE returns to the speaker',!$('app').classList.contains('editing'));
+  click(q('[data-do=del]'));await wait(300);
+  check('the first Delete only arms it: pressed in, CONFIRM',S().programs().length===programs+1&&q('[data-do=del]').classList.contains('armed')&&/Confirm/.test(q('[data-do=del]').textContent));
+  click(q('[data-do=compare]'));await wait(300);click(q('[data-do=compare]'));await wait(300);
+  check('another key disarms it',!q('[data-do=del]').classList.contains('armed')&&S().programs().length===programs+1);
+  click(q('[data-do=del]'));await wait(200);click(q('[data-do=del]'));await wait(400);
+  check('Delete twice removes the copy and moves on',S().programs().length===programs&&!!q('#keys .pkey.editing'));
+  // + new starts flat, not a copy
+  click(q('#keys [data-new]'));await wait(700);
+  check('+ new makes a flat program',S().programs().length===programs+1&&ed().bands.every(b=>b===0)&&/^New program/.test(ed().name),ed().name);
+  click(q('[data-do=del]'));await wait(200);click(q('[data-do=del]'));await wait(400);
+  // the visiting key: a program beyond the twelfth gets its own faded key while edited
+  {const extra=[];while(S().programs().length<13)extra.push(S().create({name:'Smoke filler'}));await wait(300);
+    const far=S().programs()[12];click(q('#keys [data-library]'));await wait(600);click(q(`#libgrid [data-lkey="${far.key}"]`));await wait(900);
+    const v=q('#keys .pkey.visiting');check('a program past twelve visits in another colour',!!v&&getComputedStyle(v).backgroundColor!==getComputedStyle(q('#keys .pkey.prog')).backgroundColor);
+    check('all other program keys share one colour',new Set(all('#keys .pkey.prog:not(.visiting)').map(k=>getComputedStyle(k).backgroundColor)).size===1);
+    click(q('#keys .pkey.prog'));await wait(700);extra.forEach(k=>S().remove(k));await wait(300);}
+  check('no orange outline on the key being edited',!/255, 90, 20/.test(getComputedStyle(q('#keys .pkey.editing')||document.body).boxShadow));
+  document.activeElement?.blur?.();document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));await wait(900);
+  check('Esc leaves the editor for home',!$('app').classList.contains('editing'));
 
   // the EQ button on the drawing
   const lit=S().lit();click(q('#spk .spk-eq'));await wait(900);
   check('the EQ button steps to the next light',S().lit()===(lit+1)%3,`${lit} -> ${S().lit()}`);
 
-  // settings: the widget's explanation lives on the Speakers page
+  // settings: the widget's explanation lives on the Speakers page (gone to from the editor, which it leaves)
+  click($('editKey'));await wait(900);
   click($('deviceBtn'));await wait(300);
   check("a speaker's Settings has no widget picker",!q('#sheet .dv-wgrid')&&!!q('#sheet [data-dv=appsettings]'));
   click(q('#sheet [data-dv=appsettings]'));await wait(1200);
   check('App settings opens the Speakers page with Settings',!$('rack').hidden&&!$('sheet').hidden);
   check('which says what the widget and the bar show',/first six programs/.test($('sheet').textContent)&&/first twelve/.test($('sheet').textContent)&&all('#sheet .step').length===2);
   check('the editor is not behind the Speakers page',getComputedStyle($('surface')).display==='none');
+  check('no way back but Open: the back key is hidden',getComputedStyle($('backBtn')).display==='none');
+  check("the Speakers page drawing's EQ ring is unlit, no hand",getComputedStyle(q('#pickart .spk-eq')).cursor!=='pointer');
+  check('text is not selectable',getComputedStyle(document.body).userSelect==='none');
+  check('no tooltips anywhere, no mini speaker',!document.querySelector('#app [title]')&&!$('mini'));
+  click(q('#sheet [data-dv=close]')||document.body);await wait(300);
+  click(q('#pickinfo [data-open]'));await wait(1300);
+  check('Open lands on the home page, not the editor',$('rack').hidden&&!$('app').classList.contains('editing'));
+  const lg=q('#bank .legend')||q('.bank .legend'),la=lg&&getComputedStyle(lg).animationName;
+  check('the PROGRAM legend only fades, never moves',!lg||!/rise|sinkout|fall/.test(la),la);
 }catch(e){out.push('ERROR  '+(e&&e.stack||e));}
 const box=document.createElement('pre');box.id='smoke';box.textContent=out.join('\n');
 box.style.cssText='position:fixed;inset:10px auto auto 10px;z-index:100;max-width:92vw;max-height:94vh;overflow:auto;background:#111;color:#e8e8e8;font:13px/1.5 Consolas,monospace;padding:12px 14px;border-radius:8px;white-space:pre-wrap';

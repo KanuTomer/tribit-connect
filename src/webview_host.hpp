@@ -156,8 +156,12 @@ private:
             }
             break;
         case WM_GETMINMAXINFO:{
+            // The page needs 960 x 620 of client area (app.css .app min-width/min-height). The window keeps its
+            // side and bottom resize borders, so add them: without them the page overflowed on the right.
             UINT dpi=GetDpiForWindow(hwnd);auto* info=reinterpret_cast<MINMAXINFO*>(lp);
-            info->ptMinTrackSize={MulDiv(960,dpi,96),MulDiv(620,dpi,96)};return 0;}
+            const int pad=GetSystemMetricsForDpi(SM_CXPADDEDBORDER,dpi);
+            const int fx=GetSystemMetricsForDpi(SM_CXFRAME,dpi)+pad,fy=GetSystemMetricsForDpi(SM_CYFRAME,dpi)+pad;
+            info->ptMinTrackSize={MulDiv(960,dpi,96)+2*fx,MulDiv(620,dpi,96)+fy};return 0;}
         case WM_DPICHANGED:{
             auto* r=reinterpret_cast<RECT*>(lp);SetWindowPos(hwnd,nullptr,r->left,r->top,r->right-r->left,r->bottom-r->top,SWP_NOZORDER|SWP_NOACTIVATE);return 0;}
         case WM_ERASEBKGND:{RECT r{};GetClientRect(hwnd,&r);auto c=self->background();auto brush=CreateSolidBrush(RGB(c.R,c.G,c.B));

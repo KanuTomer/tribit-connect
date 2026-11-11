@@ -7,7 +7,7 @@
 'use strict';
 const S=Store,M=S.M,B=M.BANDS,N=B.freqs.length,$=id=>document.getElementById(id),esc=S.esc;
 const region=i=>i<3?'var(--low)':i<6?'var(--mid)':'var(--high)';
-const ui={mode:'listen',edit:null,opened:null,hold:false,choosing:null,hot:-1,toast:null,pending:new Set(),wpick:null,lastPick:null,library:false,removing:false};
+const ui={mode:'listen',edit:null,opened:null,hold:false,choosing:null,hot:-1,toast:null,pending:new Set(),wpick:null,lastPick:null,library:false,removing:false,armed:null};
 
 // ---- curves by band position --------------------------------------------------------------------
 // The editor's display is laid out in band columns, so each band's point sits above its fader.
@@ -109,8 +109,8 @@ function instruments(){
 }
 function speakerArt(){
   const s=S.speaker,state=s.status==='connecting'?'connecting':s.connected?'linked':'off',lit=S.lit();
-  if(!$('spk').firstChild){$('spk').innerHTML=Speaker.svg({light:lit,state,id:'big'});$('mini').innerHTML=Speaker.svg({light:lit,state,id:'mini',interactive:false});}
-  for(const el of [$('spk'),$('mini')])Speaker.set(el,{light:lit,state});
+  if(!$('spk').firstChild)$('spk').innerHTML=Speaker.svg({light:lit,state,id:'big'});
+  Speaker.set($('spk'),{light:lit,state});
 }
 // ---- the three assignment modules ---------------------------------------------------------------
 function units(){
@@ -170,7 +170,7 @@ function speakerName(){
 function backKey(){
   const back=rk.why==='manual'&&S.linked(),text=rk.why?`‹ ${speakerName()}`:'‹ Speakers',b=$('backBtn');
   $('app').classList.toggle('returnable',back);
-  if(b.textContent!==text){b.textContent=text;b.title=rk.why?'Back to this speaker':'All speakers';}
+  if(b.textContent!==text)b.textContent=text;   // no title: the app shows no tooltips
 }
 const lastSeen=ms=>M.whenSeen(ms);
 // ---- Speakers page ---------------------------------------------------------------------------------
@@ -218,13 +218,19 @@ function openRack(why,instant=false){
   if(drag.el)endDrag(false);cancelLibraryDrag();endHold();
   hideCtx();toggleSheet(false);ui.choosing=null;if(ui.library)toggleLibrary(false);
   S.listSpeakers();clearInterval(rk.poll);rk.poll=setInterval(()=>{if(!document.hidden)S.listSpeakers();},4000);   // a speaker paired meanwhile appears
-  const show=()=>{$('rack').hidden=false;$('app').classList.add('racked');$('modelBtn').textContent=titleName();backKey();rack();};
-  if(instant)show();else S.transition(show);
+  // The editor is left as DONE leaves it, so opening a speaker always lands on its home page.
+  const was=ui.mode==='edit'?ui.edit:null;
+  const show=()=>{if(was){ui.mode='listen';ui.hot=-1;$('app').classList.remove('editing');syncLights(was);}
+    $('rack').hidden=false;$('app').classList.add('racked');$('modelBtn').textContent=titleName();backKey();rack();};
+  if(instant)show();else{swapBank();S.transition(show);}
 }
 function closeRack(){
   if(!rk.why)return;rk.why=null;clearInterval(rk.poll);toggleSheet(false);   // the app's settings belong to the page being left
-  S.transition(()=>{$('rack').hidden=true;$('app').classList.remove('racked');lastDisplay=null;render();});
+  swapBank();S.transition(()=>{$('rack').hidden=true;$('app').classList.remove('racked');lastDisplay=null;render();});
 }
+// Between the Speakers page and a speaker's home page the bottom bar changes keys: the old ones drop
+// out with the page, the new ones rise in (styles under .swapping).
+function swapBank(){if(S.reduce())return;const a=$('app');a.classList.add('swapping');clearTimeout(swapBank.t);swapBank.t=setTimeout(()=>a.classList.remove('swapping'),1000);}
 function rack(){
   const sp=S.speakers,s=S.speaker,here=sp?.address;
   // The order is set when the page opens and kept while it is up, so a switch never reshuffles it.
@@ -258,7 +264,7 @@ function rack(){
   if(d.supported){
     const state=v.connecting?'connecting':v.linked||(!v.mine&&d.connected)?'linked':'off';
     if(!art.firstChild)art.innerHTML=Speaker.svg({light:-1,state,id:'pick',interactive:false});
-    Speaker.set(art,{light:v.linked?S.lit():-1,state});art.classList.toggle('off',state==='off');
+    Speaker.set(art,{light:-1,state});art.classList.toggle('off',state==='off');   // a picture: the EQ ring stays unlit
   }
   // The speaker in use without a link says why (M.dropReason) and offers only a key that can help:
   // Try again for busy controls, Bluetooth settings otherwise. Never "Reconnect".
@@ -493,12 +499,12 @@ function surface(){
   // undo, pops up as soon as a change is made, and goes back in when pressed. COMPARE latches with its lamp.
   const changed=!!ui.opened&&ui.opened.key===p.key&&!M.sameBands(ui.opened.bands,bands);
   morph($('transport'),`<span class="engr">Sound</span>
-     <button class="mech" data-do="compare" aria-pressed="${ui.hold}" title="Hear it as it was">Compare<span class="lamp"></span></button>
-     <button class="mech undo${changed?'':' sunk'}" data-do="undo" aria-disabled="${!changed}" title="Back to how it was (Ctrl+Z)">Undo</button>
+     <button class="mech" data-do="compare" aria-pressed="${ui.hold}">Compare<span class="lamp"></span></button>
+     <button class="mech undo${changed?'':' sunk'}" data-do="undo" aria-disabled="${!changed}" aria-keyshortcuts="Control+Z">Undo</button>
      <span class="sep"></span>
      <button class="mech" data-do="dup">Duplicate</button>
      ${approx?'':`<button class="mech" data-do="flat">Flat</button>
-     <button class="mech" data-do="del">Delete</button>`}`);
+     <button class="mech del${ui.armed===p.key?' armed':''}" data-do="del" aria-pressed="${ui.armed===p.key}">${ui.armed===p.key?'Confirm':'Delete'}<span class="lamp"></span></button>`}`);
 }
 function render(){
   if(!S.ready())return;
@@ -551,7 +557,7 @@ function widgetSection(){
     <p class="dv-sub">The widget and the tray menu show your first six programs. The program bar shows the first twelve.</p>
     ${added?'':`<div class="steps">
       <div class="step${dev?' done':''}"><span class="no">1</span><div><b>Turn on Developer Mode</b><small>Windows shows widgets from apps outside the Microsoft Store only while this is on.</small>${dev?'<span class="ok">On</span>':'<button class="mech" data-dv="developer">Open Windows settings</button>'}</div></div>
-      <div class="step"><span class="no">2</span><div><b>Add the widget</b><small>Press Win + W, choose + Add widgets, then XSound Plus 2.</small></div></div>
+      <div class="step"><span class="no">2</span><div><b>Add the widget</b><small>Press Win + W, choose + Add widgets, then XSound&nbsp;Plus&nbsp;2.</small></div></div>
     </div>`}</section>`;
 }
 // Updates: what the host reports (updates.hpp), as one line and at most two keys.
@@ -567,8 +573,8 @@ function updateRow(){
 // Start with Windows: the package's startup task, as Windows reports it (app.cpp query_startup).
 function startupRow(){
   const v=String(S.settings.startup||'unknown'),on=v==='on'||v==='policy-on';
-  const hint={'user-off':'Turned off in Windows Settings > Apps > Startup. Turn it on there first.','policy-on':'Set by your organisation','policy-off':'Turned off by your organisation',
-    unavailable:'Only in the installed app',unknown:'Checking…'}[v]||'Opens in the tray when you sign in, so the widget is ready';
+  const hint={'user-off':'Turned off in Windows Settings > Apps > Startup. Turn it on there first.','policy-on':'Set by your organisation.','policy-off':'Turned off by your organisation.',
+    unavailable:'Only in the installed app.',unknown:'Checking…'}[v]||'Opens in the tray when you sign in, so the widget is ready.';
   return sw(on,'Start with Windows',hint,'startup',v.startsWith('policy')||v==='unavailable'||v==='unknown');
 }
 function appSheet(){
@@ -582,7 +588,7 @@ function appSheet(){
     </section>
     <section><h4 class="engr">Updates</h4>${updateRow()}</section>
     <section><h4 class="engr">Help</h4>
-      ${sw(!!st.logging,'Diagnostic log','Only needed for troubleshooting','logging')}
+      ${sw(!!st.logging,'Diagnostic log','Only needed for troubleshooting.','logging')}
       <div class="dv-remove">${ui.removing?`<p>Remove all profiles and settings from this PC?</p><div class="dv-row"><button class="mech danger" data-dv="remove-yes">Remove</button><button class="mech" data-dv="remove-no">Keep</button></div>`:
         `<button class="dv-link" data-dv="remove">Remove my data…</button>`}</div>
       <p class="dv-note"><button class="dv-link" data-dv="submit">Another Tribit speaker? Help add it</button></p>
@@ -662,7 +668,7 @@ function leaveEdit(){endHold();const was=ui.edit;S.transition(()=>{ui.mode='list
 function load(key){if(key===ui.edit||!S.find(key))return;endHold();const was=ui.edit;ui.edit=key;openProgram(key);render();hear(S.find(key));syncLights(was);}
 function setBand(i,v){
   let p=editing();if(!p||!S.linked())return;
-  ui.hold=false;
+  ui.hold=false;if(ui.armed)disarm();
   v=Math.max(-8,Math.min(8,Math.round(v)));
   const b=(p.factory?S.bandsOf(p):p.bands).slice();if(b[i]===v)return;
   // A factory program is fixed in the speaker: the first change makes a copy, and the copy is edited.
@@ -670,10 +676,10 @@ function setBand(i,v){
   b[i]=v;S.setBands(p.key,b);S.audition(raw(b));   // queued: only the newest curve is sent
   surface();bank();
 }
+// "+ new" starts a flat program after the current one; DUPLICATE is the way to copy one.
 function newProfile(){
-  const from=ui.mode==='edit'?editing():playing();let key;
-  if(from&&from.foreign){key=S.create({name:'From the speaker'});S.save(key,S.speaker.bands.slice());}
-  else key=S.create({from:from?from.key:null});
+  const cur=ui.mode==='edit'?editing():playing();
+  const key=S.create({name:'New program',after:cur&&!cur.foreign?cur.key:null});
   const editing_=ui.mode==='edit';
   if(editing_)load(key);else enterEdit(key);
   setTimeout(()=>{if(ui.edit===key){$('pname').focus();$('pname').select();}},editing_?0:560);
@@ -705,6 +711,12 @@ document.addEventListener('contextmenu',e=>{
 });
 function hideCtx(){$('ctx').hidden=true;}
 $('libbody').addEventListener('scroll',hideCtx);
+// Delete takes two presses: the first arms it (pressed in, red lamp, CONFIRM; in the menu, "Delete …?"),
+// the second within ARM_MS deletes. Anything else, or waiting, disarms it.
+const ARM_MS=3000;
+function armDelete(key){ui.armed=key;clearTimeout(armDelete.t);armDelete.t=setTimeout(disarm,ARM_MS);if(ui.mode==='edit')surface();}
+function disarm(){if(!ui.armed)return;ui.armed=null;clearTimeout(armDelete.t);if(ui.mode==='edit')surface();
+  const c=$('ctx').querySelector('[data-ctx=del].armed');if(c){c.classList.remove('armed');c.textContent='Delete';}}
 // Deleting keeps Undo; a program open in the editor hands over to its neighbour.
 function removeProfile(key){
   const p=S.find(key);if(!p||p.factory)return;
@@ -717,7 +729,11 @@ function removeProfile(key){
 document.addEventListener('click',async e=>{
   const t=e.target;
   const cx=t.closest('[data-ctx]');
-  if(cx){const key=$('ctx').dataset.key,what=cx.dataset.ctx;hideCtx();
+  // Any press other than the armed Delete itself disarms it.
+  if(ui.armed&&!t.closest('[data-do=del]')&&!(cx&&cx.dataset.ctx==='del'))disarm();
+  if(cx&&cx.dataset.ctx==='del'&&!cx.classList.contains('armed')){const p=S.find($('ctx').dataset.key);
+    if(p){cx.classList.add('armed');cx.textContent=`Delete ${p.name}?`;armDelete(p.key);}return;}
+  if(cx){const key=$('ctx').dataset.key,what=cx.dataset.ctx;hideCtx();if(what==='del')disarm();
     if(what==='edit'){toggleLibrary(false);ui.mode==='edit'?load(key):enterEdit(key);}
     else if(what==='dup'){const k=S.create({from:key});
       if(ui.mode==='edit'&&ui.edit===key&&!ui.library){load(k);$('pname').focus();$('pname').select();}else toast(`Made ${S.find(k).name}`);}
@@ -725,8 +741,8 @@ document.addEventListener('click',async e=>{
     return;}
   if(!t.closest('#ctx'))hideCtx();
   const win=t.closest('[data-win]');if(win){Bridge.send({type:'window',action:win.dataset.win});return;}
-  // ‹ Speakers: back to the app's home, the Speakers page.
-  if(t.closest('#backBtn')){toggleSheet(false);if(!rk.why)openRack('manual');else if(rk.why==='manual'&&S.linked())closeRack();return;}
+  // ‹ Speakers: to the app's home, the Speakers page. (There is no way back from it but Open.)
+  if(t.closest('#backBtn')){toggleSheet(false);if(!rk.why)openRack('manual');return;}
   const op=t.closest('[data-open]');
   if(op){const a=op.dataset.open;
     // The speaker in use: back to it. Another: switch, and the page closes once it links.
@@ -783,14 +799,19 @@ document.addEventListener('click',async e=>{
     const o=ui.opened;if(!o||!S.linked())return;ui.hold=true;S.audition(o.preset!=null?{preset:o.preset}:raw(o.bands));surface();}
   else if(d==='dup'){endHold();const k=S.create({from:p.key});load(k);$('pname').focus();$('pname').select();}
   else if(d==='flat'){const flat=B.freqs.map(()=>0);endHold();S.setBands(p.key,flat);if(S.linked())S.audition(raw(flat));lastDisplay=null;render();}
-  else if(d==='del')removeProfile(p.key);
+  else if(d==='del'){if(ui.armed===p.key){disarm();removeProfile(p.key);}else armDelete(p.key);}
 });
 $('pname').addEventListener('change',e=>{const p=editing();if(p&&!p.factory)S.rename(p.key,e.target.value);});
 $('pname').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key==='Escape')e.target.blur();});
 document.addEventListener('keydown',e=>{
   if(typeof e.key!=='string')return;   // autofill and some input methods send key events without a key
   // Escape closes what is on top first: the menu, then Settings, then the page under them.
-  if(e.key==='Escape'){if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(rk.why==='manual'&&S.linked()){closeRack();return;}if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}}
+  // A key press other than Enter or Space on the armed Delete disarms it (Escape included).
+  if(ui.armed&&!((e.key==='Enter'||e.key===' ')&&e.target.closest?.('[data-do=del],[data-ctx=del]'))){disarm();if(e.key==='Escape')return;}
+  // Escape closes what is on top first: the menu, then Settings, the library, a light's pick, and last
+  // the editor (as DONE). Escape while renaming only ends the rename; on the Speakers page it does nothing.
+  if(e.key==='Escape'){if(!$('ctx').hidden){hideCtx();return;}if(!$('sheet').hidden){toggleSheet(false);return;}if(rk.why)return;if(ui.library){toggleLibrary(false);return;}if(ui.choosing!==null){ui.choosing=null;render();return;}
+    if(ui.mode==='edit'&&e.target.id!=='pname'&&!drag.started){leaveEdit();return;}}
   if((e.key==='Enter'||e.key===' ')&&e.target.closest?.('#spk .spk-eq')){e.preventDefault();nextLight();return;}
   const uk=e.altKey&&(e.key==='ArrowLeft'||e.key==='ArrowRight')&&e.target.closest?.('.pkey.prog');
   if(uk){e.preventDefault();const key=uk.dataset.key,i=S.programs().findIndex(p=>p.key===key);S.move(key,i+(e.key==='ArrowRight'?1:-1));
@@ -806,6 +827,10 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='0'){setBand(i,0);}
   else if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();$('channels').querySelector(`[data-band="${Math.max(0,Math.min(N-1,i+(e.key==='ArrowRight'?1:-1)))}"]`)?.focus();}
 });
+// The focus ring shows only while moving around with Tab; a press with the mouse or a finger hides it.
+// (The browser's own rule also drew it on a clicked button as soon as any key was pressed.)
+addEventListener('keydown',e=>{if(e.key==='Tab')document.documentElement.classList.add('kbd');},true);
+addEventListener('pointerdown',()=>document.documentElement.classList.remove('kbd'),true);
 // A band column lights up on the plate and on the display together.
 function setHot(i){if(ui.hot===i)return;ui.hot=i;dplot.hot(i);$('channels').querySelectorAll('.chan').forEach((c,k)=>c.classList.toggle('hot',k===i));}
 document.addEventListener('pointerover',e=>{if(ui.mode!=='edit')return;const c=e.target.closest('[data-chan]');if(c)setHot(+c.dataset.chan);});

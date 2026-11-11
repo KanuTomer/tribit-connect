@@ -8,7 +8,7 @@ const sim={
   speaker:{connected:true,status:'connected',error:'',name:'XSound Plus 2',firmware:'0.3.1',battery:90,
     preset:1,bands:[0,0,0,0,0,0,0,0,0],buttons:[{preset:0},{preset:1},{preset:3}],
     prompts:[1,1,1,1,1],autoShutdown:1,lastSeen:Date.now(),settled:false,reason:''},
-  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',devMode:/[?&]devmode/.test(location.search),widgetAdded:/[?&]widget/.test(location.search),version:'0.8.1',update:{state:'idle',version:''}},
+  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',devMode:/[?&]devmode/.test(location.search),widgetAdded:/[?&]widget/.test(location.search),version:'0.8.3',update:{state:'idle',version:''}},
   latency:260,failNext:false,
 };
 // Paired Tribit speakers for the Speakers page. ?speakers=two adds a second XSound Plus 2,

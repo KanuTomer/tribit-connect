@@ -44,7 +44,7 @@ Owner taste, in order of weight:
 
 ```
 Title bar (58px, = window caption, app-region:drag)
-  ‹ SPEAKERS (back to the Speakers page; on a speaker's page only) · model name · [mini speaker, edit mode only] · battery needle meter · link bulb + word · SETTINGS · min/max/close
+  ‹ SPEAKERS (to the Speakers page; on a speaker's page only, never on the Speakers page itself) · model name · battery needle meter · link bulb + word · SETTINGS · min/max/close
 Stage (listening)                       | Surface (editing)
   three assignment modules (one per     |   name input · lamps: FACTORY (factory only), PLAYING ON THE SPEAKER
   EQ-button light) wired by conduits    |   fader plate: LCD display in band columns, 9 channels,
@@ -123,6 +123,11 @@ Key concepts (0.8.0; the owner asked for Bandwave's simpler model):
   with a lamp (lit: the speaker plays the program as it was when it came onto the plate, and the curve as it
   is now stays dashed; pressed again or a fader moved: back to it as it is), **UNDO** (back to how it was;
   Ctrl+Z), then at the foot **DUPLICATE**, **FLAT** and **DELETE** (the last two not on factory programs). Changing a factory program makes a copy ("My XBass") and edits that.
+  **DELETE takes two presses** (0.8.2): the first arms it (pressed in, red lamp, label CONFIRM; in the
+  right-click menu, a red "Delete <name>?"), the second within 3 s deletes; any other press or key, or
+  waiting, disarms it. Undo stays after. A dialog and press-and-hold were rejected. **"+ new"** starts a
+  flat "New program" after the current one; DUPLICATE is the way to copy. **Esc** leaves the editor as
+  DONE does, once anything on top (menu, Settings, library, a light's pick) is closed.
   Editing needs the speaker: EDIT says why when it is not connected. Lights holding the program are
   written again when the editor moves on (`syncLights`), so "Profile changed" only shows if that failed.
 - **Assign**: writes what an EQ-button light selects (0x18, all three lights in one write). On the home
@@ -169,8 +174,10 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
   (`--win-off` off, `--orange` + glow on). Do not create a button outside this family.
 - **Program key** (`.pkey`): 84px tall (72px under 700px window height), width clamp(62px,5.6vw,80px),
   number (Archivo 700 24px) + name; amber LED strip above (`.led`), light dots top-right
-  (`.dot i.l0/l1/l2`), `.editing` = inset orange rim, `.busy` = blinking LED while its write waits,
-  `.playing` = amber LED. Factory keys `--key`, user keys `--key-user`.
+  (`.dot i.l0/l1/l2`), `.busy` = blinking LED while its write waits, `.playing` = amber LED. Every
+  program key is `--key` (ivory), own and factory alike (0.8.2; the library's "≈ Factory" tag is the only
+  difference). The key being edited has no outline (owner: removed in 0.8.2); its amber LED and the plate's
+  name show it. Only a **visiting** key wears `--key-user`, the old faded tan, so it reads as a guest.
 - **The bar's row** (`.userrow`, keys `.pkey.prog`): the first `M.BANK` (12) programs in the user's order
   (`bankProfiles`), numbered 01–12, with no groups or labels. `fit()` gives every key one width (`--kw`,
   56–112px) and hides whole keys from the end only when even 56px does not fit. Then `+ new`, an
@@ -188,8 +195,8 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
   (`translateY(calc(100% + 24px))` ↔ none, .38s, `visibility` delayed on close, `inert` while closed) while
   what is behind it fades. Close: DONE in its head, or Esc. One grid (`#libgrid`), six to a row: row one is
   the widget's six and rows one and two are the bar, which is why there are no section labels.
-- **Records** (`.rec`): a **square** sleeve, like an album cover (owner: keep them square; `--key-user`,
-  factory ones `--key` with a small "≈ Factory" tag; key edge/drop, inset opening line) with number,
+- **Records** (`.rec`): a **square** sleeve, like an album cover (owner: keep them square; all `--key`,
+  factory ones with a small "≈ Factory" tag; key edge/drop, inset opening line) with number,
   `mini()` LCD curve, name, light dots; a vinyl disc (`<symbol id="disc">` in index.html, reused) peeks 16px
   out of the top, rises 8px on hover and 28px when playing (label takes `--disc-label` = amber), and spins
   (8 s/turn) only while `viz.listening && viz.playing`. Click plays (listen), opens (edit), or assigns
@@ -330,6 +337,14 @@ The template never depends on what is paired (rows hide); `AllowMultiple` stays 
   virtualization via `desktop6:FileSystemWriteVirtualization` + `unvirtualizedResources`). Nothing deletes it
   except Settings > Remove my data (inline two-step, `removeData` message). `data_folder()` migrates the old
   package LocalState once. MSIX uninstall cannot prompt; the README says so.
+- Instrument rules (0.8.2–0.8.3): no tooltips anywhere (no `title` attributes; a name a screen reader
+  needs goes in `aria-label`), and no mini speaker in the title bar (removed in 0.8.3: it did nothing);
+  sideways legends only fade, never move, since a moving animation would replace their rotation;
+  nothing is selectable but text fields (`body{user-select:none}`); the orange
+  focus ring shows only after Tab (`.kbd` on the root, cleared by any pointer press), never on a clicked
+  key after some other key press; the speaker drawing is a control only on the home page (`.spk-eq[tabindex]`),
+  elsewhere a picture with its EQ ring unlit; the window's minimum size adds its resize borders so the page
+  always gets its 960 × 620 (it used to overflow on the right).
 - Hardening rules (0.7.4):
   - A page that hides the others (`.app.racked`, the Speakers page) does so with `display:none!important`.
     Mode rules of equal weight (`.app.editing .surface{display:grid}`) otherwise win by source order.
@@ -374,8 +389,9 @@ is still its thread's active window, so on the next show Windows skips the activ
 and it took the focus while staying under the window in front (0.7.6; `hide()` now clears the active window). The menu (0.7.5) shows
 the speaker and battery, the widget's six buttons with the playing one ticked, Open and Quit. Opening the
 menu keeps the controls open for 25 s (`tray_until`), and a button picked before the link is up plays once
-it is (`tray_play`). Page additions in 0.7.5: the back key becomes "‹ <speaker>" on a Speakers page opened
-by hand (`backKey`, `.returnable`); Enter or a double-click on a selector key opens that speaker; a
+it is (`tray_play`). Page additions in 0.7.5: the back key became "‹ <speaker>" on a Speakers page opened
+by hand (removed in 0.8.2: the only way into a speaker is its card and Open, which always lands on its home
+page, never the editor; going to the Speakers page leaves the editor as DONE does); Enter or a double-click on a selector key opens that speaker; a
 speaker's Settings ends with "App settings ›"; every program key with a queued write blinks
 (`ui.pending` is a set). Start with Windows is the
 package's `windows.startupTask` (`TribitConnectStartup`, off by default). Windows owns its state, so the host
