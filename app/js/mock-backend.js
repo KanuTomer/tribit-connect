@@ -24,6 +24,8 @@ PAIRED.six=[...PAIRED.two,
   {name:'Tribit StormBox Micro 2 — Kitchen Counter',model:'StormBox Micro 2',address:'00:11:22:33:44:04',connected:false,supported:false},
   {name:'Tribit XSound Mega',model:'XSound Mega',address:'00:11:22:33:44:05',connected:true,supported:false},
   {name:"Kanu's XSound Plus 2 Bedroom",model:'XSound Plus 2',address:'00:11:22:33:44:06',connected:false,supported:true}];
+// ?showcase (with store.js's showcase library): the speaker plays Night Desk, which is also on its first light.
+if(/[?&]showcase/.test(location.search)){const nd=[3,4,2,0,-1,-1,0,1,2];Object.assign(sim.speaker,{preset:CUSTOM,bands:nd.slice(),buttons:[{preset:CUSTOM,bands:nd.slice()},{preset:1},{preset:3}]});}
 sim.settings.startup=(location.search.match(/[?&]startup=([\w-]+)/)||[])[1]||sim.settings.startup;sim.paired=structuredClone(PAIRED[(location.search.match(/[?&]speakers=(\w+)/)||[])[1]]||PAIRED.one);
 sim.address=sim.paired.find(d=>d.supported)?.address||'';
 // States for screenshots: ?scene=compare (a moved fader, Compare on, a hovered channel) and ?scene=menu

@@ -174,6 +174,7 @@ both for the updater to offer it.
     the simulator's controls.
   - Query options set up other states, such as `?offline`, `?speakers=two`, `?uptodate`, `?music` and
     `?scene=compare`. They are listed in [app/js/mock-backend.js](app/js/mock-backend.js).
+  - `?showcase` fills the library with 22 programs, as in the screenshots above.
   - `?smoke` runs a scripted pass over the main flows.
 - **The host** is [src/app.cpp](src/app.cpp): the speaker link ([src/controller.hpp](src/controller.hpp)),
   the widget provider, the tray, and the updater ([src/updates.hpp](src/updates.hpp)).
