@@ -20,17 +20,65 @@ test('the Speakers page shows only when the app cannot carry on by itself',()=>{
   assert.equal(M.rackReason({linked:true,status:'connected',list:two,chosen:true}),null);
 });
 
-test('each speaker keeps its own widget buttons',()=>{
+test('a library from disk is made safe before it is used',()=>{
+  assert.equal(M.normalizeLibrary(null),null);
+  assert.equal(M.normalizeLibrary('nope'),null);
+  assert.equal(M.normalizeLibrary([]),null);
+  // nothing usable inside: still a library the views can draw
+  const bare=M.normalizeLibrary({profiles:'x',links:7});
+  assert.deepEqual(bare.profiles,[]);assert.deepEqual(bare.links,{custom:null,slots:[null,null,null]});
+  const good={key:'p1',name:'Desk',bands:[1,2,3,4,5,6,7,8,99],rev:3,draft:[0,0,0,0,0,0,0,0,0],pinned:true};
+  const lib=M.normalizeLibrary({future:'kept',profiles:[good,
+      {key:'p1',name:'twin',bands:good.bands},          // same key twice
+      {key:'p2',name:'short',bands:[1,2,3]},            // not nine bands
+      {key:'f1',name:'fake factory',bands:good.bands},   // a factory key
+      {key:'p3',bands:[0,0,0,0,0,0,0,0,'x']},null,7,
+      {key:'p4',name:'   ',bands:[0,0,0,0,0,0,0,0,0],draft:[0,0,0,0,0,0,0,0,0]}],
+    links:{custom:{key:'gone',bands:good.bands},slots:[{key:'p1',bands:good.bands},'x']},
+    widget:['p1',5],widgetBy:{A:['f5','p1'],B:'x'}});
+  assert.deepEqual(lib.profiles.map(p=>p.key),['p1','p4']);
+  assert.equal(lib.profiles[0].bands[8],M.BANDS.range);      // clamped
+  assert.equal(lib.profiles[0].pinned,undefined);assert.equal(lib.profiles[0].rev,3);
+  assert.equal(lib.profiles[0].draft,undefined);   // the editor is live: drafts are not kept
+  assert.equal(lib.profiles[1].name,'Untitled');assert.equal(lib.profiles[1].draft,undefined);   // a draft equal to the saved curve is none
+  assert.equal(lib.links.custom,null);assert.equal(lib.links.slots.length,3);assert.equal(lib.links.slots[0].key,'p1');assert.equal(lib.links.slots[1],null);
+  // per-speaker widget buttons are gone: the widget is the first six programs
+  assert.equal(lib.widget,undefined);assert.equal(lib.widgetBy,undefined);assert.equal(lib.future,'kept');
+  // an order is always there: own profiles, then the six factory programs
+  assert.deepEqual(lib.order.slice(0,2),['p1','p4']);assert.equal(lib.order.length,8);
+  // everything the views call works on the result
+  assert.equal(M.widgetSlots(lib).length,6);assert.equal(M.slotView({buttons:[]},lib,2).status,'unknown');
+  // a library this app wrote comes back unchanged in substance
+  let mine=M.emptyLibrary();mine=M.createProfile(mine,{name:'Desk'}).library;
+  assert.deepEqual(M.normalizeLibrary(JSON.parse(JSON.stringify(mine))).profiles,mine.profiles);
+});
+
+test('last seen carries the date unless it was today',()=>{
+  const now=new Date(2026,10,12,15,0).getTime();
+  assert.equal(M.whenSeen(0,now),'');
+  assert.doesNotMatch(M.whenSeen(new Date(2026,10,12,9,5).getTime(),now,'en-GB'),/Nov/);
+  assert.match(M.whenSeen(new Date(2026,10,9,9,5).getTime(),now,'en-GB'),/^9 Nov, /);
+  assert.match(M.whenSeen(new Date(2025,10,9,9,5).getTime(),now,'en-GB'),/2025/);
+});
+
+test('one list of programs: own profiles and factory presets in the order the user gives them',()=>{
   let lib=M.emptyLibrary();
-  lib=M.setWidget(lib,0,'f5','A');
-  assert.equal(M.widgetKeys(lib,'A')[0],'f5');
-  assert.equal(M.widgetKeys(lib,'B')[0],M.WIDGET_DEFAULT[0]);   // another speaker is untouched
-  lib=M.setWidget(lib,1,'f4','B');
-  assert.equal(M.widgetKeys(lib,'A')[1],M.WIDGET_DEFAULT[1]);
-  assert.deepEqual(Object.keys(M.widgetSlotsBy(lib)).sort(),['A','B']);
-  // buttons from before 0.7.1 carry over to a speaker that has none of its own yet
-  const old={...M.emptyLibrary(),widget:['f2','f1','f3','f4','f0','f5']};
-  assert.equal(M.widgetKeys(old,'C')[0],'f2');
+  // a new library is the six factory programs
+  assert.deepEqual(M.programs(lib).map(p=>p.key),M.FACTORY.map(p=>p.key));
+  const a=M.createProfile(lib,{name:'A'});lib=a.library;const b=M.createProfile(lib,{name:'B'});lib=b.library;
+  // new profiles go ahead of the factory programs, in the order made
+  assert.deepEqual(M.programs(lib).slice(0,3).map(p=>p.name),['A','B','XBass Off']);
+  assert.equal(M.numberOf(lib,a.key),1);assert.equal(M.numberOf(lib,'f0'),3);assert.equal(M.numberOf(lib,'nope'),null);
+  // a factory program can be moved like any other, and the order survives a save and a load
+  lib=M.moveProfile(lib,'f5',0);
+  assert.deepEqual(M.programs(lib).slice(0,3).map(p=>p.name),['Jazz','A','B']);
+  assert.deepEqual(M.normalizeLibrary(JSON.parse(JSON.stringify(lib))).order,lib.order);
+  // a library from before 0.8.0 has no order: own profiles first, factory after
+  const old={profiles:lib.profiles,links:lib.links};
+  assert.deepEqual(M.normalizeLibrary(old).order.slice(0,3),[a.key,b.key,'f0']);
+  // an order naming things that are gone, or twice, is repaired
+  assert.deepEqual(M.orderOf({...lib,order:['zz',b.key,b.key,'f1']}).slice(0,3),[b.key,a.key,'f1']);
+  assert.equal(M.orderOf({...lib,order:'x'}).length,8);
 });
 
 test('launch decides at once, with no grace and no flash of the instrument',()=>{
@@ -143,19 +191,30 @@ test('drafts live with their profile until saved',()=>{
   assert.equal(M.findProfile(M.setDraft(lib,r.key,saved),r.key).draft,undefined);
   assert.equal(M.setDraft(lib,'f1',draft),lib);
 });
-test('profiles can be rearranged; links and widget buttons follow the profile, not its place',()=>{
+test('programs can be rearranged; links follow the profile, not its place',()=>{
   let lib=M.emptyLibrary();const keys=['A','B','C'].map(name=>{const r=M.createProfile(lib,{name});lib=r.library;return r.key;});
-  lib=M.setWidget(lib,0,keys[0]);
+  lib=M.linkApplied(lib,M.findProfile(lib,keys[0]));
   lib=M.moveProfile(lib,keys[0],2);
-  assert.deepEqual(lib.profiles.map(p=>p.name),['B','C','A']);
-  assert.equal(M.widgetKeys(lib)[0],keys[0]);
+  assert.deepEqual(M.programs(lib).slice(0,3).map(p=>p.name),['B','C','A']);
+  assert.equal(lib.links.custom.key,keys[0]);
   assert.equal(M.moveProfile(lib,keys[1],0),lib);
-  assert.deepEqual(M.moveProfile(lib,keys[1],99).profiles.map(p=>p.name),['C','A','B']);
+  assert.equal(M.moveProfile(lib,'nope',0),lib);
+  assert.equal(M.programs(M.moveProfile(lib,keys[1],99)).at(-1).name,'B');
 });
-test('the bank is the first six profiles',()=>{
-  let lib=M.emptyLibrary();const keys=[];for(const n of 'ABCDEFG'){const r=M.createProfile(lib,{name:n});lib=r.library;keys.push(r.key);}
-  assert.deepEqual(M.bankProfiles(lib).map(p=>p.name),['A','B','C','D','E','F']);
-  lib=M.moveProfile(lib,keys[6],0);assert.deepEqual(M.bankProfiles(lib).map(p=>p.name),['G','A','B','C','D','E']);
+test('the program bar is the first twelve programs and the widget the first six',()=>{
+  let lib=M.emptyLibrary();const keys=[];for(const n of 'ABCDEFGH'){const r=M.createProfile(lib,{name:n});lib=r.library;keys.push(r.key);}
+  assert.equal(M.BANK,12);assert.equal(M.WIDGET,6);
+  assert.deepEqual(M.bankProfiles(lib).map(p=>p.name),['A','B','C','D','E','F','G','H','XBass Off','XBass','MaxSound','Rock']);
+  assert.deepEqual(M.widgetKeys(lib),keys.slice(0,6));
+  lib=M.moveProfile(lib,'f4',0);
+  assert.equal(M.bankProfiles(lib)[0].name,'Rock');assert.equal(M.widgetKeys(lib)[0],'f4');
+  // the host gets the widget's buttons resolved: a preset id, or a name and its curve
+  const slots=M.widgetSlots(lib);
+  assert.deepEqual(slots[0],{preset:4});
+  assert.equal(slots[1].preset,M.CUSTOM);assert.equal(slots[1].name,'A');assert.equal(slots[1].bands.length,9);
+  // deleting a program closes the gap: the next one moves up onto the widget
+  lib=M.deleteProfile(lib,keys[0]).library;
+  assert.deepEqual(M.widgetKeys(lib),['f4',...keys.slice(1,6)]);
 });
 test('copies are numbered after the original and placed next to it',()=>{
   let lib=M.emptyLibrary();let r=M.createProfile(lib,{name:'Desk'});lib=r.library;const desk=r.key;
@@ -163,16 +222,17 @@ test('copies are numbered after the original and placed next to it',()=>{
   r=M.createProfile(lib,{from:desk});lib=r.library;const copy=r.key;
   r=M.createProfile(lib,{from:copy});lib=r.library;
   r=M.createProfile(lib,{from:desk});lib=r.library;
-  assert.deepEqual(lib.profiles.map(p=>p.name),['Desk','Desk copy 3','Desk copy','Desk copy 2','Other']);
+  assert.deepEqual(M.programs(lib).slice(0,5).map(p=>p.name),['Desk','Desk copy 3','Desk copy','Desk copy 2','Other']);
+  // a copy of a factory program sits right after it
+  r=M.createProfile(lib,{from:'f1'});lib=r.library;
+  const names=M.programs(lib).map(p=>p.name);assert.equal(names[names.indexOf('XBass')+1],'My XBass');
   r=M.createProfile(lib,{name:'x'.repeat(40)});assert.equal(M.findProfile(r.library,r.key).name.length,M.NAME_MAX);
 });
-test('widget buttons default to the presets and fall back when a profile goes',()=>{
-  let lib=M.emptyLibrary();
-  assert.deepEqual(M.widgetKeys(lib),M.WIDGET_DEFAULT);
-  const r=M.createProfile(lib,{name:'Desk'});lib=M.setWidget(r.library,2,r.key);
-  const slots=M.widgetSlots(lib);
-  assert.deepEqual(slots[0],{preset:0});
-  assert.equal(slots[2].preset,M.CUSTOM);assert.equal(slots[2].name,'Desk');assert.equal(slots[2].bands.length,9);
-  lib=M.deleteProfile(lib,r.key).library;
-  assert.deepEqual(M.widgetSlots(lib)[2],{preset:3});
+test('deleting keeps the order for Undo; factory programs cannot be deleted',()=>{
+  let lib=M.emptyLibrary();const keys=['A','B','C'].map(name=>{const r=M.createProfile(lib,{name});lib=r.library;return r.key;});
+  lib=M.moveProfile(lib,'f0',1);   // A, XBass Off, B, C, …
+  const {library:after,undo}=M.deleteProfile(lib,keys[1]);
+  assert.deepEqual(M.programs(after).slice(0,3).map(p=>p.name),['A','XBass Off','C']);
+  assert.deepEqual(M.programs(M.undoDelete(after,undo)).slice(0,4).map(p=>p.name),['A','XBass Off','B','C']);
+  assert.equal(M.deleteProfile(lib,'f0').library,lib);
 });

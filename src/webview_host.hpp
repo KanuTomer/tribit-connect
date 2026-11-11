@@ -44,10 +44,34 @@ public:
         start();
     }
     ~WebViewHost(){if(window)DestroyWindow(window);}
-    void show(){const bool was=visible();if(IsIconic(window))ShowWindow(window,SW_RESTORE);else ShowWindow(window,SW_SHOW);SetForegroundWindow(window);
-        if(controller_)controller_->put_IsVisible(TRUE);if(!was&&on_shown)on_shown(true);}
+    void show(){const bool was=visible();if(IsIconic(window))ShowWindow(window,SW_RESTORE);else ShowWindow(window,SW_SHOW);
+        if(controller_)controller_->put_IsVisible(TRUE);if(!was&&on_shown)on_shown(true);
+        front();}
+    // In front and focused. Opened from the tray, Windows may refuse a plain SetForegroundWindow (the
+    // taskbar or the tray's overflow panel still has the focus), which left the window behind the others:
+    // then borrow the foreground thread's input state, and at the very least raise the window.
+    void front(){
+        if(!window||!IsWindowVisible(window))return;
+        if(GetForegroundWindow()!=window){
+            SetForegroundWindow(window);
+            if(HWND other=GetForegroundWindow();other!=window){
+                const DWORD theirs=other?GetWindowThreadProcessId(other,nullptr):0,ours=GetCurrentThreadId();
+                if(theirs&&theirs!=ours&&AttachThreadInput(ours,theirs,TRUE)){BringWindowToTop(window);SetForegroundWindow(window);AttachThreadInput(ours,theirs,FALSE);}
+            }
+        }
+        // Focus alone does not put the window on top. A window closed to the tray with its own X is hidden
+        // while it is still its thread's active window; shown again, Windows takes it for already active and
+        // skips the activation that would raise it, so it got the focus but stayed underneath the window that
+        // was in front (measured: foreground, yet below it in z-order). So it is always raised explicitly:
+        // to the top of everything, then back among the ordinary windows, still above them.
+        SetWindowPos(window,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+        SetWindowPos(window,HWND_NOTOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
+        if(GetForegroundWindow()==window){SetActiveWindow(window);if(controller_)controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);}
+    }
     // Hidden in the tray: the page is told it is hidden (document.hidden), so it pauses like a closed window.
-    void hide(){if(!visible())return;ShowWindow(window,SW_HIDE);if(controller_)controller_->put_IsVisible(FALSE);if(on_shown)on_shown(false);}
+    void hide(){if(!visible())return;ShowWindow(window,SW_HIDE);
+        if(GetActiveWindow()==window)SetActiveWindow(nullptr);   // not left as the active window while hidden (see front)
+        if(controller_)controller_->put_IsVisible(FALSE);if(on_shown)on_shown(false);}
     bool visible()const{return window&&IsWindowVisible(window);}
     // Messages wait until the page has loaded its bridge.
     void post(const std::wstring& json){if(view_&&ready_)view_->PostWebMessageAsJson(json.c_str());else if(pending_.size()<64)pending_.push_back(json);}

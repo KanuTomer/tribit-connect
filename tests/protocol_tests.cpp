@@ -58,6 +58,11 @@ int main(){try{
     expect(parsed&&parsed->light==2&&parsed->preset==MaxSound,"Button slot parses");
     expect(preset_name(2)=="Audiobook"&&preset_name(4)=="Rock","Preset ids confirmed on the speaker");
     expect(hex(Bytes{0x0A,0xFF})=="0A FF","Hex formatting");
+    // Noise that looks like a header with an enormous length must not hold up the real frame behind it.
+    Bytes noisy(kSpeakerHeader.begin(),kSpeakerHeader.end());noisy.insert(noisy.end(),{0x01,0x2A,0xFF,0xFF,0x00});
+    auto real=encode(0x2A,Bytes{1,2,3},true);noisy.insert(noisy.end(),real.begin(),real.end());
+    Parser guarded;guarded.feed(noisy);auto behind=guarded.next();
+    expect(behind&&behind->command==0x2A&&behind->data==Bytes{1,2,3},"A bogus frame length does not block the next frame");
 
     std::cout<<"Passed: captured framing, reassembly, checksum rejection, EQ, voice prompts, EQ button.\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<"\n";return 1;}}

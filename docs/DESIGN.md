@@ -46,17 +46,18 @@ Owner taste, in order of weight:
 Title bar (58px, = window caption, app-region:drag)
   ‹ SPEAKERS (back to the Speakers page; on a speaker's page only) · model name · [mini speaker, edit mode only] · battery needle meter · link bulb + word · SETTINGS · min/max/close
 Stage (listening)                       | Surface (editing)
-  three assignment modules (one per     |   name input · single state lamp (SAVED|DRAFT|FACTORY)
+  three assignment modules (one per     |   name input · lamps: FACTORY (factory only), PLAYING ON THE SPEAKER
   EQ-button light) wired by conduits    |   fader plate: LCD display in band columns, 9 channels,
   to the drawn speaker's EQ button      |   one dB scale (left), LOW/MID/HIGH brackets, transport
   offline card over speaker when needed |
-Program bank (168px, charcoal, always visible)
-  PROGRAM legend · FACTORY 01–06 · YOURS (first six profiles) + "+ new" (editor only) + "All N" (Library) · LCD (curve + spectrum; folds away in the editor) · EDIT/DONE
-Library drawer (slides up from behind the bank over row 2): ▾ tab · YOURS · count · search; crates ON THE BANK (first six) and LIBRARY, of records
+Program bar (168px, charcoal; covered only by All programs)
+  PROGRAM legend · the first twelve programs, 01–12, no groups · "+ new" (editor only) · "All N" · LCD (curve + spectrum; folds away in the editor) · EDIT/DONE
+All programs (a page: slides up over the stage AND the bar): PROGRAMS · count · search · DONE; one grid of records, six to a row, in the user's order
 Settings sheet (overlay, right, 368px; SETTINGS). One key; what it holds follows the page:
   on a speaker's page: the speaker's name · firmware (and why there is no link, only then) · Try again (busy
-  only) · Beeps · Auto shutdown · WIDGET (that speaker's six buttons, Let the phone app connect) · note
-  on the Speakers page: APPEARANCE · WINDOW (Close to tray, Start with Windows) · UPDATES (version,
+  only) · Beeps · Auto shutdown · Let the phone app connect · note · App settings ›
+  on the Speakers page: APPEARANCE · WIDGET (what it shows; Developer Mode and Add the widget, with their
+  state) · WINDOW (Close to tray, Start with Windows) · UPDATES (version,
   Check for updates, Check now / Update to x.y.z) ·
   HELP (Diagnostic log, Remove my data, Help add a speaker)
 Speakers page (laid out like the home page): title bar keeps only "Tribit Connect" + window buttons ·
@@ -95,31 +96,39 @@ Speakers page rules (owner's choices):
   yet (asked once; `chosen` in state.json). ‹ Speakers in the title bar opens it any time; Esc
   or Open on the speaker in use closes it. Once open for a missing speaker it stays until that speaker links. A hidden window never shows it, so the idle release
   ("Let the phone app connect", sleep) does not throw the user out.
-- **Kick back on disconnect, return by itself.** The editor stays as it was underneath (Audition stops with
-  the link; drafts are already saved), so the speaker coming back returns to the same profile and draft.
+- **Kick back on disconnect, return by itself.** The editor stays as it was underneath (every change is
+  already kept), so the speaker coming back returns to the same program.
 - **Tribit speakers only.** Unsupported models say "Not supported yet" and their key opens the
   add-your-speaker site with `?model=`. Two of one model go by their Windows names.
 - Pressing a selector key (or the arrow keys) only selects; the key on the stage acts on it.
 - The key order is fixed when the page opens (in use, supported, others) and never reshuffles while up.
-- **Per-speaker widget.** Each speaker keeps its own six widget buttons (`library.widgetBy`, by address;
-  the host shows `widgetSlotsBy[address]`) and its own "Let the phone app connect" (`speakers[address]` in
-  state.json). A speaker without its own starts from the buttons that existed before.
+- **Per speaker:** only "Let the phone app connect" (`speakers[address]` in state.json). The widget's
+  buttons were per speaker in 0.7.1–0.7.6; from 0.8.0 they are the first six programs, for every speaker.
 - **Remembered speakers.** The host keeps what each speaker last reported under `speakers` in state.json (by
   address); switching shows that speaker's own last-known values, and an off speaker says when it was last seen.
 
-Key concepts and their separation (never blur these):
+Key concepts (0.8.0; the owner asked for Bandwave's simpler model):
 
-- **Play / Apply**: the speaker plays a program now (preset id, or custom bands via 0x82).
-- **Save**: stores a profile on this PC (`LocalState/profiles.json`). Never touches the speaker.
-- **Assign**: writes what an EQ-button light selects (0x18, all three lights in one write).
-- **Audition**: while its lamp is lit, every fader move streams the curve to the speaker
-  (latest-wins queue). The speaker plays an unsaved draft **only** while Audition is lit. Leaving the
-  profile/editor undoes what Audition played.
-- **Draft**: unsaved edits, auto-saved with the profile (`profile.draft`), survive restarts, cleared by
-  Save or Revert (Revert offers Undo). No confirm dialogs, ever (`confirm()` was rejected as
-  "app.tribit says…").
-- **Widget buttons**: six slots on the Windows widget, each a factory preset or a saved profile
-  (saved version). Chosen in Settings → Windows from a 3×2 replica of the widget, not dropdowns.
+- **One list of programs.** Everything playable is a program: the user's profiles and the six factory
+  presets, in one order the user arranges (`library.order`, keys of both kinds; `Model.programs`). Own
+  profiles come before the factory ones by default, because most people do not use the presets. **The first
+  twelve are the program bar; the first six are the widget's and the tray menu's buttons.** Nothing else
+  chooses either: no FACTORY/YOURS groups, no "main six", no widget picker. Settings says so once
+  (Speakers page → Widget); no other screen carries instructions.
+- **Play**: the speaker plays a program now (preset id, or custom bands via 0x82).
+- **The editor is live.** Its keys never grey out (they are physical keys): UNDO rests pressed in while there is nothing to undo and pops up when a change is made. What is on the plate is what the speaker plays, and every change is kept as it
+  is made (`Store.setBands`, written 500 ms after the hand stops; the curve streams through the
+  latest-wins queue). There is no Save, Revert, Audition or draft. The transport keeps the plate's own
+  keys (Bandwave's popup menu was tried and rejected as foreign to this look): **COMPARE**, a latching key
+  with a lamp (lit: the speaker plays the program as it was when it came onto the plate, and the curve as it
+  is now stays dashed; pressed again or a fader moved: back to it as it is), **UNDO** (back to how it was;
+  Ctrl+Z), then at the foot **DUPLICATE**, **FLAT** and **DELETE** (the last two not on factory programs). Changing a factory program makes a copy ("My XBass") and edits that.
+  Editing needs the speaker: EDIT says why when it is not connected. Lights holding the program are
+  written again when the editor moves on (`syncLights`), so "Profile changed" only shows if that failed.
+- **Assign**: writes what an EQ-button light selects (0x18, all three lights in one write). On the home
+  page: press a light's key, then a program. Clicking the EQ button on the drawing plays the next light.
+- No confirm dialogs, ever (`confirm()` was rejected as "app.tribit says…"). Delete offers Undo.
+- No standing instruction text (owner, 11 Nov 2026: it takes away from the look).
 
 ## 3. Tokens (`app/styles/app.css` `:root` and `:root[data-theme=dark]`)
 
@@ -132,7 +141,7 @@ Colour has jobs. Do not introduce a colour without a job.
 | Panel | `--panel` | the program bank only (the one dark panel; in dark theme it is darker still) |
 | Keys | `--key`, `--key-user`, `--key-edge`, `--key-ink` | program keys stay light in both themes; `--key-ink` is fixed dark |
 | Act / attention | `--orange` #ff5a14, `--orange-edge` | primary action (EDIT, Play), focus ring, armed, active lamps in Settings |
-| Playing / draft | `--amber` #ffb21a | playing LED on keys, draft dot, writing |
+| Playing | `--amber` #ffb21a | playing LED on keys, writing, Playing on the speaker |
 | Bands | `--low` #2f6fe4, `--mid` #2f9e5b, `--high` #e4572e | fader caps and LOW/MID/HIGH brackets only |
 | Lights | `Speaker.LIGHT` ['#4a4b51','#f7f8fb','#3d8bff'], `WIRE` ['#9b9ca4','#f6f6f1','#4d95ff'] | the speaker's three EQ-button lights; live conduit core colour |
 | LCD | `--lcd` #22271e, `--lcd-ink` #d5ecab, `--lcd-dim`, `--lcd-ghost` | every display, both themes |
@@ -160,27 +169,27 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
   (`--win-off` off, `--orange` + glow on). Do not create a button outside this family.
 - **Program key** (`.pkey`): 84px tall (72px under 700px window height), width clamp(62px,5.6vw,80px),
   number (Archivo 700 24px) + name; amber LED strip above (`.led`), light dots top-right
-  (`.dot i.l0/l1/l2`), amber draft dot after the number (`.dm`), `.editing` = inset orange rim,
+  (`.dot i.l0/l1/l2`), `.editing` = inset orange rim, `.busy` = blinking LED while its write waits,
   `.playing` = amber LED. Factory keys `--key`, user keys `--key-user`.
-- **YOURS row**: the first `M.BANK` (6) saved profiles in library order (`bankProfiles`); pinning was tried
-  and retired (copies inherited pins, and the limit was unclear). `fit()` hides whole keys from the end
-  only on narrow windows (`overflow:hidden`). Then `+ new`, an **editor-only** key that folds to width 0 on
-  the home page (CSS transition, `inert`, never rebuilt), and the slim **Library key** (`.pkey.lib`, 46px,
-  "All N" / "Close"). A profile opened in the editor from the library **visits** as a sixth key
-  (`.visiting`, user profiles only) so the editor always has a lit key; it is not part of the bank order.
-  Key width `clamp(56px,4.9vw,80px)` and LCD `clamp(150px,13vw,210px)` so six keys + Library fit at 1280 (fit() drops whole keys below that). The Library key latches pressed-in while open (no orange rim). The drawer never takes focus on open.
+- **The bar's row** (`.userrow`, keys `.pkey.prog`): the first `M.BANK` (12) programs in the user's order
+  (`bankProfiles`), numbered 01–12, with no groups or labels. `fit()` gives every key one width (`--kw`,
+  56–112px) and hides whole keys from the end only when even 56px does not fit. Then `+ new`, an
+  **editor-only** key that folds to width 0 on the home page (CSS transition, `inert`, never rebuilt), and
+  the slim **All key** (`.pkey.lib`, 46px, "All N"). A program opened in the editor that is not on the bar
+  **visits** as an extra key (`.visiting`) so the editor always has a lit key.
 - **Key drag (pointer events, never HTML5 DnD)**: native DnD drew a translucent OS drag image next to the
   real key (rejected as "two images"). `drag` state: 6px threshold → the real key is `.held` (lifted,
-  shadow) and follows the pointer along the row; the others get `translateX(±step)` with a .2s ease; drop
-  settles the key (.18s) then `Store.move` to the library index of the key it landed on (the bank is a
-  subset). Lifting >48px up (or any factory key) switches to **carry**: the key is reparented to `body`
-  (`.carried`, fixed) leaving an invisible `.gap`, modules under the pointer get `.drop`, dropping assigns.
-  The click after a drag is swallowed (capture listener, removed next tick). Esc cancels. Alt+←/→ moves too.
-- **Library drawer** (`#library`, `ui.library`): a drawer that slides up from **behind the bank**
-  (`.bank` z-index 4, `.library` translateY(100%) ↔ none, .38s both ways, `visibility` delayed on close,
-  `inert` while closed). Close: the pull tab (▾) on its top edge, the Library key (reads Close), or Esc.
-  Two crates, one list in library order: **ON THE BANK** (`#libzone`, recessed well, first six; no hint text) and **LIBRARY** (`#librest`).
-- **Records** (`.rec`): sleeve (`--key-user`, key edge/drop, inset opening line) with number + draft dot,
+  shadow) and slides **along the row only** (clamped to it; before 0.8.0 a key could be lifted off the bar
+  and carried to a light, which read as a bug); the others get `translateX(±step)` with a .2s ease; drop
+  settles the key (.18s) then `Store.move` to that place in the list. The click after a drag is swallowed
+  (capture listener, removed next tick). Esc cancels. Alt+←/→ moves too. Right-click: the program's menu.
+- **All programs** (`#library`, `ui.library`): a page, not a drawer. It spans grid rows 2–3, so it covers
+  the stage **and** the program bar (the bar was wasted space under the old drawer), slides up
+  (`translateY(calc(100% + 24px))` ↔ none, .38s, `visibility` delayed on close, `inert` while closed) while
+  what is behind it fades. Close: DONE in its head, or Esc. One grid (`#libgrid`), six to a row: row one is
+  the widget's six and rows one and two are the bar, which is why there are no section labels.
+- **Records** (`.rec`): a **square** sleeve, like an album cover (owner: keep them square; `--key-user`,
+  factory ones `--key` with a small "≈ Factory" tag; key edge/drop, inset opening line) with number,
   `mini()` LCD curve, name, light dots; a vinyl disc (`<symbol id="disc">` in index.html, reused) peeks 16px
   out of the top, rises 8px on hover and 28px when playing (label takes `--disc-label` = amber), and spins
   (8 s/turn) only while `viz.listening && viz.playing`. Click plays (listen), opens (edit), or assigns
@@ -193,8 +202,8 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 - **Rolling names** (`rollName(box,on)`): only on the selected item (playing/editing key or record, lit
   light module) and only if it overflows: two copies in `.roll`, translateX(−width) at ~30 px/s, looping;
   reduced motion → static.
-- **Ghost curve** (amber dashes: what the speaker plays) is hidden while Audition is lit; the speaker follows
-  the plate then, and the confirm lag made the line trail the faders.
+- **Ghost curve** (amber dashes): only while COMPARE is lit, the program as it is now, under the
+  curve as it was (which is what the speaker plays then). The editor is live, so there is no other ghost.
 - **Arming a light** sets `.app.choosing`: bank keys and library sleeves pulse (`offer`).
 - **Assignment module** (`.unit`): engraved light name, recessed lamp key (`.lampkey .face`, the light's
   colour; lit = glow including the "off" light, which gets a neutral glow, never a box), 7-seg number +
@@ -218,9 +227,10 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 - **Displays**: grid stroke `--lcd-ink` at 7% (zero line 22%), curve #e6f6c6 2.4px, no glow, fill ~4%.
   Bank LCD: curve drawn by a pen (nib, 700 ms) when the program changes; faint spectrum bars (`.bars`,
   12% `--lcd-ink`) in band columns behind it; top-right state text only `PAUSED`/`OFFLINE`.
-- **Settings sheet**: `section`s Speaker (beep chips, auto shutdown switch), Windows (widget 3×2 grid →
-  slide-open `.dv-pick` list, two columns, max-height 190px scroll, "Yours · N" count; phone release;
-  diagnostic log), Appearance (Light/Dark/Windows segmented). Switch rows: bold label + one-line hint in
+- **Settings sheet**: on a speaker's page, one section (name, facts, beep chips, auto shutdown, Let the phone
+  app connect) and "App settings ›"; on the Speakers page, Appearance (segmented), Widget (one line on what it
+  shows, then two numbered steps with their state), Window, Updates, Help. When it changes what it holds it
+  fades the new contents in (`.swap`). The widget's 3×2 picker was removed in 0.8.0. Switch rows: bold label + one-line hint in
   plain language (never implementation detail such as "15 s after the widget hides"). Sheet is updated with
   `morph()` (attribute/text diff), never `innerHTML`, so switches slide and lamps fade.
 - **Title bar**: the mini speaker appears left of the meter in edit mode so the right-hand cluster
@@ -233,13 +243,14 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 ## 5. State model (frontend)
 
 - `js/model.js`: pure, unit-tested (`node --test app/tests/model.test.js`). Library
-  `{profiles:[{key,name,bands,rev,draft?,basedOn,approx}], links:{custom,slots[3]}, widget:[6 keys]}`.
+  `{profiles:[{key,name,bands,rev,basedOn,approx}], order:[keys, own and factory], links:{custom,slots[3]},
+  widgetSlots}` (0.8.0; `normalizeLibrary` drops old `draft`, `widget` and `widgetBy` and builds `order`).
   `activeKey` identifies the speaker's custom curve by band content. `slotView` → synced/stale/changed/unknown.
-  `moveProfile`, `setDraft`, `bankProfiles`/`BANK`, `uniqueName` (copies named after the original, numbered, ≤ `NAME_MAX` 32), `createProfile({from,after})` (inserts after its source), `widgetSlots` (resolved for the host: factory `{preset}`, saved
+  `programs`/`orderOf`/`numberOf`, `moveProfile`, `bankProfiles`/`BANK` (12), `WIDGET` (6), `uniqueName` (copies named after the original, numbered, ≤ `NAME_MAX` 32), `createProfile({from,after})` (inserts after its source), `widgetSlots` (resolved for the host: factory `{preset}`, saved
   `{preset:254,name,bands}`).
-- `js/store.js`: the only writer. `persist()` sends `saveLibrary` with `widgetSlots` attached; drafts persist
-  debounced 500 ms. Audition queue: single-flight, latest wins, restores through the same queue; `apply`
-  waits for it. `Store.transition(fn)`: `.leaving` 150 ms → `fn()` → `.arriving` 700 ms (timers, not frames,
+- `js/store.js`: the only writer. `persist()` sends `saveLibrary` with `widgetSlots` (the first six programs)
+  attached; `setBands` (the live editor) persists debounced 500 ms. Curve stream: single-flight, latest wins;
+  `apply` and `assign` run one at a time (`queue`). `Bridge.request` fails by itself after 15 s. `Store.transition(fn)`: `.leaving` 150 ms → `fn()` → `.arriving` 700 ms (timers, not frames,
   so a hidden window cannot stall it; instant under reduced motion).
 - `js/app.js`: views. Rule: **build once, update in place.** `instruments()`, `speakerArt()`, `units()`,
   conduits, bank keys (`dataset.html` signature; playing/busy/editing toggled), sheet (`morph`). Only rebuild
@@ -310,7 +321,7 @@ The template never depends on what is paired (rows hide); `AllowMultiple` stays 
 - Speaker writes are confirmed by reading back; the speaker does not clamp, the app enforces ±8 dB.
 - The speaker takes one control connection; the phone app is locked out while the app holds it.
 - Assigning a light preserves the other two lights' raw bytes.
-- The speaker plays an unsaved draft only while Audition is lit.
+- The editor is live: the program on the plate is the one the speaker plays, and every change is kept.
 - Factory programs are read-only; their curves are approximations (≈).
 - The visualizer analyses only this PC's audio to the default output when that output is the speaker;
   it never claims to know about phone playback.
@@ -319,6 +330,25 @@ The template never depends on what is paired (rows hide); `AllowMultiple` stays 
   virtualization via `desktop6:FileSystemWriteVirtualization` + `unvirtualizedResources`). Nothing deletes it
   except Settings > Remove my data (inline two-step, `removeData` message). `data_folder()` migrates the old
   package LocalState once. MSIX uninstall cannot prompt; the README says so.
+- Hardening rules (0.7.4):
+  - A page that hides the others (`.app.racked`, the Speakers page) does so with `display:none!important`.
+    Mode rules of equal weight (`.app.editing .surface{display:grid}`) otherwise win by source order.
+  - Every request gets a result. The host answers even a message it could not parse (`web_message` wraps
+    `handle_message`), and `Bridge.request` fails by itself after 15 s.
+  - Speaker writes from the page run one at a time (`store.js` `queue`); an assign is built from what the
+    speaker reported after the write before it.
+  - A command the app refuses (`Rejected` in `controller.hpp`: bad preset, band out of range, controls not
+    open) fails alone. Only a real link failure resets the link.
+  - The library reaches the page once, with the reply to `ready`, and passes through
+    `Model.normalizeLibrary`. A `profiles.json` that exists but cannot be read is copied to
+    `profiles.bad-<time>.json` and reported as `libraryError`; the page then saves nothing until the user
+    changes something. `profiles.bak` is the library as it was at the session's first save.
+  - `Core.transition` never drops a change: a new transition runs the waiting one first.
+  - Setup's elevated step trusts only the certificate embedded in setup itself, never a file path, and a
+    downloaded Windows App Runtime installer runs only if Windows trusts its signature.
+  - The updater holds the verified setup open without write sharing until it is launched, and every
+    waiting state (Checking, Downloading, Installing) ends by itself.
+  - In the tray the speaker is always let go 15 s after the window hides (`Controller::release_always`).
 
 ## 11. Distribution
 
@@ -332,10 +362,22 @@ Installs from 0.4.0 and earlier have no updater and need one manual install.
 
 **Tray and startup** (0.7.3, ported from Bandwave). Close to tray (`state.json` `tray`, default off): the
 window's WM_CLOSE hides it instead (`WebViewHost::on_close`), the WebView is set invisible so the page sees
-`document.hidden`, the spectrum stops and `interest()` counts a hidden window as closed, so the speaker is
-released as after a real close. The icon lives on a hidden `TribitConnect.Tray` window (message-only windows
+`document.hidden`, the spectrum stops and `interest()` counts a hidden window as closed. From 0.7.4 the
+speaker is released 15 s later whatever "Let the phone app connect" says, and showing the window again
+decides which page to show as at launch (under the boot cover, after a short hold for the reconnect). The icon lives on a hidden `TribitConnect.Tray` window (message-only windows
 miss `TaskbarCreated` and can't own the menu); it shows while the window is open with the switch on, and
-always while the window is hidden. Click opens; the menu has Open and Quit. Start with Windows is the
+always while the window is hidden. Click opens, and `WebViewHost::front()` makes sure the window really
+comes forward (Windows can refuse `SetForegroundWindow` while the taskbar or the tray overflow has focus;
+`front()` then borrows the foreground thread's input, and runs again 250 ms later). `front()` also always
+raises the window explicitly (topmost, then not topmost): a window closed with its own X is hidden while it
+is still its thread's active window, so on the next show Windows skips the activation that would raise it,
+and it took the focus while staying under the window in front (0.7.6; `hide()` now clears the active window). The menu (0.7.5) shows
+the speaker and battery, the widget's six buttons with the playing one ticked, Open and Quit. Opening the
+menu keeps the controls open for 25 s (`tray_until`), and a button picked before the link is up plays once
+it is (`tray_play`). Page additions in 0.7.5: the back key becomes "‹ <speaker>" on a Speakers page opened
+by hand (`backKey`, `.returnable`); Enter or a double-click on a selector key opens that speaker; a
+speaker's Settings ends with "App settings ›"; every program key with a queued write blinks
+(`ui.pending` is a set). Start with Windows is the
 package's `windows.startupTask` (`TribitConnectStartup`, off by default). Windows owns its state, so the host
 reads or requests it off the UI thread and reports `settings.startup`: `on`, `off`, `user-off` (turned off in
 Settings > Apps > Startup, so only Windows can turn it back on), `policy-on`/`policy-off`, or `unavailable`

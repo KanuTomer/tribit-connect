@@ -8,17 +8,18 @@ Connect). An independent project, not affiliated with Tribit or Microsoft. MIT l
 
 ## Features
 
-- **Programs.** Play the six factory EQ presets or your own profiles, from the app or the widget.
-- **Custom EQ.** A nine-band editor (80 Hz to 13 kHz, ±8 dB) with faders and a display you can draw on.
-  Unsaved drafts are kept until you save or revert them. **Audition** plays the curve on the speaker
-  while you move the faders.
-- **Library.** All your profiles in a drawer, shown as records, with search. The first six sit on the
-  program bank; drag a record into that row to put it there. Right-click a record to edit, duplicate or
-  delete it.
+- **Programs.** One list of everything the speaker can play: your own profiles and the six factory
+  presets, in the order you choose. The first twelve are the keys on the program bar.
+- **All programs.** Every program on one page, as records with their curves, with search. Drag to
+  rearrange; right-click to edit, duplicate or delete.
+- **Live EQ editor.** Nine bands (80 Hz to 13 kHz, ±8 dB), with faders and a display you can draw on.
+  The speaker plays what you see, and every change is kept as you make it; there is nothing to save.
+  **Compare** plays it as it was until you press it again, and **Undo** goes back. Changing a factory preset
+  makes a copy you can edit.
 - **The EQ button's lights.** The speaker's EQ button cycles through three lights (off, white, blue).
   Choose what each light plays, including your own curves; the speaker keeps them through a power cycle.
-- **Widget.** Battery, connection and six program buttons, which you choose for each speaker. It can
-  also switch between your speakers.
+- **Widget and tray menu.** Battery, connection and your first six programs. The widget can also switch
+  between your speakers.
 - **Several speakers.** The **Speakers** page lists your paired Tribit speakers. The app remembers what
   each one last reported, so switching back shows its last-known settings.
 - **Speaker settings.** Voice prompt beeps and auto shutdown.
@@ -62,7 +63,8 @@ with Windows 11.
 
 **Speakers page.** The app opens on the speaker you used last. If that speaker is off, or you have two
 or more and haven't picked one, it opens on the Speakers page instead, and goes to the speaker by itself
-once Windows connects it. **‹ Speakers** in the title bar takes you there at any time.
+once Windows connects it. **‹ Speakers** in the title bar takes you there at any time, and the same key
+(then showing the speaker's name) or Esc takes you back. Enter or a double-click on a speaker opens it.
 
 **One controller at a time.** The speaker accepts a single control connection. While Tribit Connect holds
 it, the Tribit app on your phone can't connect. Turn on **Let the phone app connect** in that speaker's
@@ -73,12 +75,17 @@ Tribit Connect says **Controls busy** and offers **Try again**.
 
 | Where | What Settings holds |
 |---|---|
-| A speaker's page | that speaker's beeps, auto shutdown, widget buttons and Let the phone app connect |
-| The Speakers page | the app's appearance, window, updates and help |
+| A speaker's page | that speaker's beeps, auto shutdown and Let the phone app connect |
+| The Speakers page | the app's appearance, widget, window, updates and help (**App settings ›** in a speaker's Settings goes there) |
+
+**The widget.** Windows shows a widget from an app outside the Microsoft Store only while Developer
+Mode is on. Settings on the Speakers page shows whether it is, opens the right Windows page, and tells
+you how to add the widget. Without the widget, the tray icon's menu has the same six buttons.
 
 **Close to tray.** Closing the window keeps the app in the notification area. Click the icon to bring it
-back, or right-click it and choose **Quit**. While the window is hidden, the app lets go of the speaker
-as it would if you closed it.
+back, or right-click it for a menu: the speaker and its battery, the widget's six buttons (pick one to
+play it without opening the app), **Open** and **Quit**. About 15 seconds after the window is hidden, the app lets
+go of the speaker, so the phone app can connect while Tribit Connect sits in the tray.
 
 **Start with Windows.** The app starts in the tray when you sign in, so the widget is ready. Windows
 controls this switch: if it won't stay on, allow Tribit Connect in Windows Settings > Apps > Startup.
@@ -95,7 +102,9 @@ Profiles and settings are stored in `%LOCALAPPDATA%\Tribit Connect`:
 
 | File | Contents |
 |---|---|
-| `profiles.json` | your profiles, drafts, their order, and each speaker's widget buttons |
+| `profiles.json` | your profiles and the order of your programs |
+| `profiles.bak` | your profiles as they were when the app last started, in case a save goes wrong |
+| `profiles.bad-<time>.json` | a profiles file the app could not read, kept instead of being replaced |
 | `state.json` | the speaker in use, the last values read from each speaker, and the app's settings |
 | `theme` | light or dark, so the window opens in the right colour |
 | `WebView2\` | the app window's browser cache (safe to delete) |

@@ -8,7 +8,7 @@ const sim={
   speaker:{connected:true,status:'connected',error:'',name:'XSound Plus 2',firmware:'0.3.1',battery:90,
     preset:1,bands:[0,0,0,0,0,0,0,0,0],buttons:[{preset:0},{preset:1},{preset:3}],
     prompts:[1,1,1,1,1],autoShutdown:1,lastSeen:Date.now(),settled:false,reason:''},
-  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',version:'0.7.3',update:{state:'idle',version:''}},
+  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',devMode:/[?&]devmode/.test(location.search),widgetAdded:/[?&]widget/.test(location.search),version:'0.8.1',update:{state:'idle',version:''}},
   latency:260,failNext:false,
 };
 // Paired Tribit speakers for the Speakers page. ?speakers=two adds a second XSound Plus 2,
@@ -52,12 +52,15 @@ function playMusic(on){
     emit({type:'spectrum',playing:true,listening:true,bands:lv.map((v,i)=>Math.max(0,Math.min(1,v+(i<2?beat:0)+(Math.random()-.5)*.25)))});},50);
 }
 function library(){try{return JSON.parse(localStorage.getItem(STORE))||null;}catch{return null;}}
-function publish(){emit({type:'state',speaker:structuredClone(sim.speaker),settings:{...sim.settings},library:library()});}
+// ?badlibrary: a profiles file that exists but cannot be read (the page must not start a new one over it).
+const BAD=/[?&]badlibrary/.test(location.search);
+function publish(){emit({type:'state',speaker:structuredClone(sim.speaker),settings:{...sim.settings},library:BAD?null:library(),...(BAD?{libraryError:true}:{})});}
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 // Writes behave like the speaker: refused while disconnected, acknowledged after a short delay.
 async function write(id,change){
   const s=sim.speaker;
   if(!s.connected){emit({type:'result',id,ok:false,error:'The speaker is not connected.'});return;}
+  if(sim.mute){console.info('[mock] not answering',id);return;}   // the page's own timeout must end the wait
   s.status='updating';publish();
   await delay(sim.latency);
   if(sim.failNext){sim.failNext=false;s.status='connected';publish();emit({type:'result',id,ok:false,error:'The speaker did not confirm the change.'});renderDebug();return;}
@@ -87,6 +90,9 @@ function receive(m){
     case 'listSpeakers':speakers();break;
     case 'chooseSpeaker':{const d=sim.paired.find(x=>x.address===m.address&&x.supported);if(!d)break;
       sim.address=d.address;sim.settings.chosen=true;s.connected=false;s.status='disconnected';s.reason='off';s.lastSeen=d.seen;publish();if(d.connected)connect(true);break;}
+    // A script error on the page is shown, so a broken mock is never mistaken for a blank design.
+    case 'log':{const b=document.createElement('pre');b.textContent=m.text;b.style.cssText='position:fixed;left:8px;top:8px;z-index:99;max-width:70vw;white-space:pre-wrap;background:#b00020;color:#fff;font:12px/1.4 monospace;padding:8px 10px;border-radius:6px';document.body.append(b);break;}
+    case 'openDeveloper':console.info('[mock] would open Windows developer settings');sim.settings.devMode=true;publish();break;
     case 'openBluetooth':console.info('[mock] would open Windows Bluetooth settings');break;
     case 'openSubmit':console.info('[mock] would open https://tribit-connect-submit.vercel.app/'+(m.model?'?model='+encodeURIComponent(m.model):''));break;
     case 'window':console.info('[mock] window',m.action);break;
@@ -110,6 +116,7 @@ function renderDebug(){
     <button data-a="error">${s.status==='unavailable'?'clear error':'bluetooth error'}</button>
     <button data-a="busy">controls busy</button>
     <button data-a="fail" ${sim.failNext?'class=on':''}>fail next write</button>
+    <button data-a="mute" ${sim.mute?'class=on':''}>never answer</button>
     <label>battery <input data-a="battery" type="range" min="0" max="100" value="${s.battery}"> ${s.battery}%</label>
     <label>latency <input data-a="latency" type="range" min="0" max="2000" step="50" value="${sim.latency}"> ${sim.latency} ms</label>
     <button data-a="press">press EQ button</button>
@@ -126,6 +133,7 @@ function setupDebug(){
     // Windows has the speaker, but another controller (the phone app) holds its controls.
     if(a==='busy'){s.connected=false;s.status='unavailable';s.reason='busy';s.error='The speaker did not accept the control connection.';publish();renderDebug();}
     if(a==='fail'){sim.failNext=!sim.failNext;renderDebug();}
+    if(a==='mute'){sim.mute=!sim.mute;renderDebug();}
     if(a==='press'&&s.connected){const lights=s.buttons;const i=(lights.findIndex(b=>b.preset===s.preset&&(b.preset!==CUSTOM||JSON.stringify(b.bands)===JSON.stringify(s.bands)))+1)%3;
       s.preset=lights[i].preset;s.bands=lights[i].bands?lights[i].bands.slice():[0,0,0,0,0,0,0,0,0];publish();}
     if(a==='music'){playMusic(!music);renderDebug();}
@@ -135,5 +143,7 @@ function setupDebug(){
     if(a==='latency')sim.latency=+e.target.value;
     renderDebug();});
 }
+// ?smoke runs tests/smoke.js: a scripted pass over the real controls, reported in a box on the page.
+if(/[?&]smoke/.test(location.search))addEventListener('load',()=>{const t=document.createElement('script');t.src='tests/smoke.js';document.body.append(t);});
 root.MockBackend={connect(fn){emit=fn;setTimeout(()=>{if(!music)emit({type:'spectrum',playing:false,listening:true,bands:[]});},200);if(/[?&]music/.test(location.search))setTimeout(()=>playMusic(true),300);if(document.readyState==='loading')addEventListener('DOMContentLoaded',setupDebug);else setupDebug();},receive};
 })(this);
