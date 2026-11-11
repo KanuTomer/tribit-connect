@@ -6,10 +6,22 @@ const M=Model,subs=new Set();
 let speaker=null,library=null,settings={},speakers=null,bootOver=false;
 setTimeout(()=>{bootOver=true;emit();},4000);
 const emit=()=>subs.forEach(fn=>{try{fn();}catch(e){Bridge.report(e);}});
+// ?showcase (browser mock, README screenshots): a lived-in library of 22 programs, sixteen of your own among the
+// six factory presets, in an order someone would keep (bar first, then the rest).
+const SHOWCASE=[['Night Desk',[3,4,2,0,-1,-1,0,1,2]],['Morning Coffee',[1,1,0,0,1,2,2,1,0]],['Lo-fi Beats',[4,3,1,0,-1,-2,-2,-3,-4]],
+  ['Podcast',[-3,-2,0,2,3,3,1,-1,-2]],['Garden Party',[5,4,1,-1,0,1,2,4,3]],['Shoegaze',[2,3,1,-2,-3,-1,2,3,2]],
+  ['Film Night',[4,3,0,-1,1,2,1,2,3]],['Vinyl Warmth',[3,2,2,1,0,-1,-2,-2,-3]],['Deep House',[6,5,2,-1,-2,0,1,2,2]],
+  ['Acoustic',[0,1,2,2,1,2,3,2,1]],['Workout',[6,5,2,0,-1,1,3,4,4]],['Classical Hall',[1,1,0,-1,0,1,2,3,3]],
+  ['Soul',[2,3,3,1,0,1,1,0,-1]],['Gaming',[3,2,0,-2,0,2,4,3,2]],['Rain Sounds',[-2,-1,0,1,2,1,-1,-3,-4]],['Kitchen Radio',[-1,0,1,2,3,3,2,0,-1]]];
+const SHOWCASE_ORDER=['Night Desk','Morning Coffee','f1','Lo-fi Beats','Podcast','Garden Party','Shoegaze','Film Night','f3','Vinyl Warmth',
+  'Deep House','Acoustic','Workout','Classical Hall','Soul','Gaming','Rain Sounds','Kitchen Radio','f0','f4','f2','f5'];
 // The app starts with an empty library; the browser mock gets a few profiles to work with.
 function seed(){
   let lib=M.emptyLibrary();
   if(Bridge.native)return lib;
+  if(/[?&]showcase/.test(location.search)){const keys={};
+    for(const [name,bands] of SHOWCASE){const r=M.createProfile(lib,{name});lib=r.library;const p=lib.profiles.at(-1);p.bands=bands;keys[name]=p.key;}
+    lib.order=SHOWCASE_ORDER.map(k=>keys[k]||k);return lib;}
   for(const [name,bands] of [['Night Desk',[3,4,2,0,-1,-1,0,1,2]],['Podcast',[-3,-2,0,2,3,3,1,-1,-2]],['Garden Party',[5,4,1,-1,0,1,2,4,3]],
     // ?many fills the row, to check how a full bank behaves
     ...(/[?&]many/.test(location.search)?['Late Night','Vocals','Outdoor','Bass Walk','Film','Piano','Desk 2','Lo-fi','Bright']:[]).map((n,i)=>[n,[i%5-2,1,0,-1,i%3,1,2,-i%4,1]])]){
@@ -155,6 +167,11 @@ Core.reduce=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 // A change is never dropped: if another transition starts while one is still stepping back, the
 // waiting change happens first (it used to be cancelled, which could leave two pages half shown).
 let shift=0,waiting=null;
+// The motion tokens in app.css (--t-norm, --t-slow, --stagger), in ms, so timers and styles never disagree.
+// Exits take --t-norm plus a little stagger; arrivals take --t-slow plus the longest stagger (the faders).
+Core.motion=name=>{const v=getComputedStyle(document.documentElement).getPropertyValue('--'+name).trim();return v.endsWith('ms')?parseFloat(v):v.endsWith('s')?parseFloat(v)*1000:0;};
+Core.exitMs=()=>Core.motion('t-norm')+Core.motion('stagger')*3;
+Core.enterMs=()=>Core.motion('t-slow')+Core.motion('stagger')*14;
 Core.transition=fn=>{
   const app=document.getElementById('app');
   clearTimeout(shift);
@@ -162,7 +179,7 @@ Core.transition=fn=>{
   if(Core.reduce()||document.hidden){app.classList.remove('leaving','arriving');fn();return;}
   app.classList.remove('arriving');app.classList.add('leaving');waiting=fn;
   shift=setTimeout(()=>{waiting=null;app.classList.remove('leaving');fn();app.classList.add('arriving');
-    shift=setTimeout(()=>app.classList.remove('arriving'),700);},280);   // long enough for the exits
+    shift=setTimeout(()=>app.classList.remove('arriving'),Core.enterMs());},Core.exitMs());
 };
 Bridge.send({type:'ready'});
 root.Store=Core;

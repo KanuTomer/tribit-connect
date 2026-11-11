@@ -6,7 +6,9 @@ const KEY='tribit-connect.theme',system=matchMedia('(prefers-color-scheme: dark)
 let choice='device';
 try{choice=localStorage.getItem(KEY)||'device';}catch{}
 // A change of theme cross-fades the colours instead of snapping.
-function fade(){const el=document.documentElement;el.classList.add('theming');clearTimeout(fade.t);fade.t=setTimeout(()=>el.classList.remove('theming'),450);}
+function fade(){const el=document.documentElement;el.classList.add('theming');clearTimeout(fade.t);
+  const slow=parseFloat(getComputedStyle(el).getPropertyValue('--t-slow'))||360;   // the cross-fade's length, from app.css
+  fade.t=setTimeout(()=>el.classList.remove('theming'),slow+40);}
 function apply(){
   const dark=choice==='dark'||(choice==='device'&&system.matches);
   document.documentElement.dataset.theme=dark?'dark':'light';
