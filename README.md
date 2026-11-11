@@ -11,11 +11,14 @@ Connect). An independent project, not affiliated with Tribit or Microsoft. MIT l
 - **Programs.** One list of everything the speaker can play: your own profiles and the six factory
   presets, in the order you choose. The first twelve are the keys on the program bar.
 - **All programs.** Every program on one page, as records with their curves, with search. Drag to
-  rearrange; right-click to edit, duplicate or delete.
+  rearrange; right-click to edit, duplicate or delete. Programs beyond the first twelve can still be
+  edited: while you do, one sits on the bar as an extra, faded key.
 - **Live EQ editor.** Nine bands (80 Hz to 13 kHz, ±8 dB), with faders and a display you can draw on.
   The speaker plays what you see, and every change is kept as you make it; there is nothing to save.
   **Compare** plays it as it was until you press it again, and **Undo** goes back. Changing a factory preset
-  makes a copy you can edit.
+  makes a copy you can edit. **+ new** starts a flat program and **Duplicate** copies one. **Delete** takes
+  two presses: the first arms it (Confirm, with a red light), the second deletes, and Undo is offered after.
+  Esc or **Done** returns to the speaker.
 - **The EQ button's lights.** The speaker's EQ button cycles through three lights (off, white, blue).
   Choose what each light plays, including your own curves; the speaker keeps them through a power cycle.
 - **Widget and tray menu.** Battery, connection and your first six programs. The widget can also switch
@@ -63,8 +66,8 @@ with Windows 11.
 
 **Speakers page.** The app opens on the speaker you used last. If that speaker is off, or you have two
 or more and haven't picked one, it opens on the Speakers page instead, and goes to the speaker by itself
-once Windows connects it. **‹ Speakers** in the title bar takes you there at any time, and the same key
-(then showing the speaker's name) or Esc takes you back. Enter or a double-click on a speaker opens it.
+once Windows connects it. **‹ Speakers** in the title bar takes you there at any time. To go back, choose
+the speaker and **Open** (or press Enter, or double-click it); it opens on its home page.
 
 **One controller at a time.** The speaker accepts a single control connection. While Tribit Connect holds
 it, the Tribit app on your phone can't connect. Turn on **Let the phone app connect** in that speaker's

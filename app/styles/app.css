@@ -12,20 +12,36 @@
 
 :root{
   --ivory:#ece8de;--well:#e2ddd0;--alu:#dedacf;--paper:#faf7ee;--ink:#1c1c1a;--ink-2:#5f5c55;--ink-3:#9a958a;--rule:#cbc5b8;
-  --engrave:#45423b;--panel:#2a2a2c;--key:#f3f0e8;--key-user:#d9d3c5;--key-edge:#b5ae9f;--key-ink:#1c1c1a;
-  --orange:#ff5a14;--orange-edge:#b33a06;--amber:#ffb21a;--lcd:#22271e;--lcd-ink:#d5ecab;--lcd-dim:#58654a;--lcd-ghost:#2f3828;
-  --low:#2f6fe4;--mid:#2f9e5b;--high:#e4572e;--white-light:#f7f8fb;--blue-light:#3d8bff;
+  --engrave:#45423b;--panel:#d6cfbf;--key:#f3f0e8;--key-user:#d9d3c5;--key-edge:#a69e8b;--key-ink:#1c1c1a;
+  --act:#34312b;--act-edge:#14130f;--amber:#f2b33d;--lit:#f2b33d;--lcd:#dde3cf;--lcd-ink:#26301f;--lcd-dim:#7c866d;--lcd-ghost:#cbd2bb;
+  --band-low:#4f73a8;--band-mid:#5f8a5c;--band-high:#b86a45;--alarm:#b8432f;--white-light:#f7f8fb;--blue-light:#3d8bff;
   /* relief: --lip is the lit lower edge of anything cut into the panel, --tlip the same for legends */
   --lip:#ffffffb0;--tlip:#ffffffb0;--plate-hi:#ffffffd0;--plate-edge:#b8b1a1;--groove:#3f3c35;
   --mech-a:#f6f3ec;--mech-b:#dcd6c9;--mech-edge:#9d968a;--mech-hi:#fff;
   --bezel:#b7b0a1;--led-off:#8d877a;--led-ok:#c9c2b2;--win-off:#bdb6a6;--sw-off:#bdb7aa;--meter-edge:#a39b8a;
-  --rule-line:#00000014;--rule-major:#0000003a;--hot:#ffffff59;--hover:#0000000f;--sheet-edge:var(--ink);--divider:#0000002a;
+  --rule-line:#00000014;--rule-major:#0000003a;--hot:#0000000d;--hover:#0000000f;--sheet-edge:var(--ink);--divider:#0000002a;
   --tex:none;
-  --ease:cubic-bezier(.2,.75,.2,1);
+  /* fixed colours with one job each */
+  --on-act:#f3efe4;--act-hi:#4a463e;--danger:#c42b1c;--danger-hi:#c85a44;--danger-edge:#7a2a1a;
+  /* every lamp and LED: a warm bulb with a soft halo, never orange */
+  --lit-face:radial-gradient(circle at 40% 35%,#fff3cc,#f2b33d 72%);--amber-face:var(--lit-face);--lit-glow:#f2b33db3;--amber-glow:#f2b33db3;--needle:#c23b22;
+  --blue-glow:#3d8bffaa;--bulb-hi:#cfe6ff;--dot-off:#6e6a61;--ann-white:#fffef6;
+  --lamp0-a:#5b5953;--lamp0-b:#3d3c38;--lamp1-a:#fffef8;--lamp1-b:#e2e0d7;--lamp2-a:#7fb2ff;--lamp2-b:#2f6fe4;--lamp0-glow:#c4c7d070;
+  /* light: one ivory family top to bottom; the program bar is its deepest step, and the displays are backlit */
+  --bank-ink:#3a372f;--bank-ink-2:#7d7768;--bank-rule:#bdb5a3;--bank-led:#bab29f;--bank-add:#9f9785;--bank-add-ink:#7d7768;
+  --bank-key:#c9c1ae;--bank-key-hi:#c2baa6;--bank-key-lo:#bdb4a0;--bank-key-edge:#a39b88;
+  --bank-shade:inset 0 1px 0 #ffffff80,0 -1px 0 var(--plate-edge);--key-drop:#0000002a;
+  --lcd-bezel:#bdb5a3;--lcd-cell:#c9c1ae;--lcd-grid:#26301f;--lcd-grid-a:.12;--lcd-curve:#1d2617;
+  --lcd-wash:#26301f12;--lcd-wash-2:#26301f0c;--lcd-dots:#26301f10;--lcd-glow:#e6ebd9;--lcd-shade:#0003;--lcd-shade-2:transparent;--lcd-compare:#26301f8c;--lcd-deep:#0003;
+  --fader-track:#4a463e;--cap-off:#bdb7aa;
+  /* motion: one curve in, one out, four durations (see docs/DESIGN.md §6) */
+  --ease:cubic-bezier(.2,.75,.2,1);--ease-exit:cubic-bezier(.4,0,1,1);
+  --t-press:80ms;--t-fast:120ms;--t-norm:220ms;--t-slow:360ms;--rise:8px;--stagger:24ms;--t-busy:1s;--t-attn:1.2s;--t-spin:8s;   /* busy blinks, attention pulses, a playing record turns */
   --fh:clamp(96px,calc((100vh - 452px) * .55),240px);   /* fader travel: about half the free height */
   color-scheme:light;
 }
-/* Dark: the same instrument in graphite. Keys, lamps, LCDs and band colours keep their jobs. */
+/* Dark: the same instrument in graphite, with the charcoal bar and dark displays. Keys, lamps and band
+   colours keep their jobs. */
 :root[data-theme=dark]{
   --ivory:#22221f;--well:#1a1a18;--alu:#2b2b28;--paper:#2f2e2a;--ink:#ece8de;--ink-2:#aaa498;--ink-3:#716c62;--rule:#3d3b36;
   --engrave:#c4beb0;--panel:#131313;--key:#d6d1c5;--key-user:#b1ab9c;--key-edge:#77726a;
@@ -33,6 +49,16 @@
   --mech-a:#3b3a36;--mech-b:#2d2c29;--mech-edge:#121211;--mech-hi:#ffffff1c;
   --bezel:#121211;--led-off:#4a4741;--led-ok:#5e5a51;--win-off:#3e3c37;--sw-off:#46443e;--meter-edge:#55524a;
   --rule-line:#ffffff0c;--rule-major:#ffffff22;--hot:#ffffff0c;--hover:#ffffff14;--sheet-edge:#58554d;--divider:#0008;
+  --lcd:#22271e;--lcd-ink:#d5ecab;--lcd-dim:#58654a;--lcd-ghost:#2f3828;--dot-off:#55565c;
+  --bank-ink:#d9d5cb;--bank-ink-2:#8f8a7f;--bank-rule:#4a4945;--bank-led:#4b4a46;--bank-add:#6d6a63;--bank-add-ink:#bdb7aa;
+  --bank-key:#3c3c3f;--bank-key-hi:#48484b;--bank-key-lo:#2f2f31;--bank-key-edge:#1c1c1d;
+  --bank-shade:inset 0 1px 0 #ffffff12;--key-drop:#0006;
+  --lcd-bezel:#1a1a1b;--lcd-cell:#2d2c2a;--lcd-grid:#d5ecab;--lcd-grid-a:.07;--lcd-curve:#e6f6c6;
+  --lcd-wash:#d5ecab10;--lcd-wash-2:#d5ecab0a;--lcd-dots:#d5ecab12;--lcd-glow:#2c3426;--lcd-shade:#000a;--lcd-shade-2:#0006;--lcd-compare:#ffb21ad9;--lcd-deep:#000c;
+  --fader-track:#2c2b29;
+  --act:#ff5a14;--act-edge:#b33a06;--act-hi:#ff7a3a;--on-act:#fff;--amber:#ffb21a;--lit:#ff5a14;
+  --lit-face:#ff5a14;--lit-glow:#ff5a14;--amber-face:#ffb21a;--amber-glow:#ffb21a;
+  --band-low:#2f6fe4;--band-mid:#2f9e5b;--band-high:#e4572e;--alarm:#e4572e;--danger-hi:#ef6a4c;--danger-edge:#8f2b12;
   --tex:none;
   color-scheme:dark;
 }
@@ -43,7 +69,7 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 button:disabled{cursor:not-allowed}
 /* The focus ring is for moving with Tab (.kbd, set in app.js), not for a key pressed after a click. */
 :focus-visible{outline:0}
-.kbd button:focus-visible,.kbd [tabindex]:focus-visible,input:focus-visible{outline:2px solid var(--orange);outline-offset:3px}
+.kbd button:focus-visible,.kbd [tabindex]:focus-visible,input:focus-visible{outline:2px solid var(--act);outline-offset:3px}
 /* An instrument, not a document: nothing is selectable except where you type. */
 body{-webkit-user-select:none;user-select:none}
 input,textarea{-webkit-user-select:text;user-select:text}
@@ -53,10 +79,11 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .engr{font-weight:600;font-stretch:120%;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
 
 /* mechanical push-buttons */
-.mech{height:34px;padding:0 14px;border-radius:5px;background:linear-gradient(var(--mech-a),var(--mech-b));border:1px solid var(--mech-edge);box-shadow:0 2px 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi);font-weight:600;font-stretch:115%;font-size:12px;letter-spacing:.08em;text-transform:uppercase;transition:transform .07s,box-shadow .07s}
-.mech:active:not(:disabled),.mech.down{transform:translateY(2px);box-shadow:0 0 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
+.mech{height:34px;padding:0 14px;border-radius:5px;background:linear-gradient(var(--mech-a),var(--mech-b));border:1px solid var(--mech-edge);box-shadow:0 2px 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi);font-weight:600;font-stretch:115%;font-size:12px;letter-spacing:.08em;text-transform:uppercase;transition:transform var(--t-press) var(--ease),box-shadow var(--t-press) var(--ease)}
+/* One pressed look for every mechanical key, whether held for a moment or latched down (open, armed, nothing to undo, a state): it sits 2px lower with its drop gone, the face unchanged, so pressing and latching never swap looks. */
+.mech:active:not(:disabled),.mech.down,.mech[aria-expanded=true],.transport .mech.state,.transport .mech.del.armed,.transport .mech.sunk{transform:translateY(2px);box-shadow:0 0 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
 .mech:disabled{opacity:.45}
-.mech[aria-expanded=true]{background:linear-gradient(var(--mech-b),var(--ivory));transform:translateY(2px);box-shadow:inset 0 1px 3px #0003}
+
 
 /* ── title bar: a nameplate that is also the window's frame ─────────────────── */
 .top{display:flex;align-items:center;gap:22px;padding-left:26px;border-bottom:1px solid var(--rule);box-shadow:0 1px 0 var(--lip);app-region:drag;-webkit-app-region:drag;min-width:0}
@@ -94,18 +121,18 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .pick-info{display:grid;justify-items:center;gap:12px;text-align:center}
 .pick-info h2{font-weight:700;font-stretch:125%;font-size:30px;letter-spacing:-.01em;line-height:1.1}
 .pick-info .state{display:flex;align-items:center;gap:8px}
-.pick-info .state .led.on{background:var(--blue-light);box-shadow:0 0 8px #3d8bffaa}
+.pick-info .state .led.on{background:var(--blue-light);box-shadow:0 0 8px var(--blue-glow)}
 .pick-info p{max-width:52ch;color:var(--ink-2);font-size:14px}
 .pick-info .acts{display:flex;gap:10px}
 .pick-info .mech{min-width:128px}
-.pick-info .mech.go{background:linear-gradient(#ff7a3a,var(--orange));color:#fff;border-color:var(--orange-edge);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
-.pick-info .mech.go:active:not(:disabled){box-shadow:0 0 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
+.pick-info .mech.go{background:linear-gradient(var(--act-hi),var(--act));color:var(--on-act);border-color:var(--act-edge);box-shadow:0 2px 0 var(--act-edge),inset 0 1px 0 #ffffff60}
+.pick-info .mech.go:active:not(:disabled){box-shadow:0 0 0 var(--act-edge),inset 0 1px 0 #ffffff60}
 /* the selector: the program bank's panel and key family, keys wide enough for a model name */
 .rack .spk-bank{grid-row:2}
 .app.racked.offline .rack .spk-keys .pkey.spk{filter:none}
 .app.racked .rack .spk-keys .pkey.spk.add{width:84px;opacity:1;margin-left:0;padding:8px 8px 7px;border-width:1.5px}
 .app.racked .rack .spk-keys .pkey.spk.add:active{transform:translateY(3px)}
-.spk-keys{display:flex;gap:16px;align-items:flex-end;min-width:0;flex:1;overflow-x:auto;scrollbar-width:thin;scrollbar-color:#4a4945 transparent}
+.spk-keys{display:flex;gap:16px;align-items:flex-end;min-width:0;flex:1;overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--bank-rule) transparent}
 .spk-keys .group{flex:none}
 .spk-keys .group-label.blank::after{display:none}
 .spk-keys .row{padding-left:2px;padding-right:2px}
@@ -114,29 +141,26 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .pkey.spk.foreign{background:var(--key-user)}
 /* latched: the selected key stays down, as a selector button does */
 .pkey.spk[aria-checked=true]{transform:translateY(3px);box-shadow:0 0 0 var(--key-edge),inset 0 2px 5px #0004}
-.pkey.spk .led.on{background:var(--blue-light);box-shadow:0 0 8px #3d8bffaa}
-.pkey.spk .led.busy{background:var(--amber);animation:blink .5s steps(2) infinite}
-.pkey.spk .led.err{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+.pkey.spk .led.on{background:var(--blue-light);box-shadow:0 0 8px var(--blue-glow)}
+.pkey.spk .led.busy{background:var(--amber);animation:blink var(--t-busy) steps(2) infinite}
+.pkey.spk .led.err{background:var(--act);box-shadow:0 0 8px var(--act)}
 .pkey.spk.add{--kw:84px}
-.app.racked.arriving .pick-art,.app.racked.arriving .pick-info{animation:rise .5s var(--ease) both}
-.app.racked.arriving .spk-keys .pkey{animation:fall .4s var(--ease) both}
-.app.racked.leaving .pick-art,.app.racked.leaving .pick-info{animation:sinkout .26s var(--ease) forwards}
 .instruments{display:flex;align-items:center;gap:18px}
 .meter{display:block}
 .meter .face{fill:var(--paper);stroke:var(--meter-edge)}
 .meter .scale-arc{fill:none;stroke:var(--engrave);stroke-width:1}
-.meter .low-arc{fill:none;stroke:var(--orange);stroke-width:2.5}
-.meter .needle{stroke:#c23b22;stroke-width:1.6;transition:transform .8s var(--ease);transform-origin:46px 36px}
+.meter .low-arc{fill:none;stroke:var(--act);stroke-width:2.5}
+.meter .needle{stroke:var(--needle);stroke-width:1.6;transition:transform calc(var(--t-slow) * 2) var(--ease);transform-origin:46px 36px}
 .meter text{font:600 7px Archivo;font-stretch:120%;letter-spacing:.12em;fill:var(--engrave)}
 .linkind{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:600;white-space:nowrap}
-.bulb{width:13px;height:13px;border-radius:50%;background:var(--led-off);box-shadow:inset 0 2px 3px #0005,0 1px 0 var(--lip);flex:none;transition:background .3s,box-shadow .3s}
-.bulb.on{background:radial-gradient(circle at 40% 35%,#cfe6ff,var(--blue-light) 65%);box-shadow:0 0 8px #3d8bffaa}
-.bulb.busy{background:var(--amber);animation:blink 1s steps(2) infinite}
-.bulb.err{background:var(--orange)}
+.bulb{width:13px;height:13px;border-radius:50%;background:var(--led-off);box-shadow:inset 0 2px 3px #0005,0 1px 0 var(--lip);flex:none;transition:background var(--t-norm) var(--ease),box-shadow var(--t-norm) var(--ease)}
+.bulb.on{background:radial-gradient(circle at 40% 35%,var(--bulb-hi),var(--blue-light) 65%);box-shadow:0 0 8px var(--blue-glow)}
+.bulb.busy{background:var(--amber);animation:blink var(--t-busy) steps(2) infinite}
+.bulb.err{background:var(--act)}
 @keyframes blink{50%{opacity:.25}}
 .winctl{display:flex;align-self:stretch}
 .winctl button{width:46px;display:grid;place-items:center;color:var(--ink-2)}
-.winctl button:hover{background:var(--hover);color:var(--ink)}.winctl .close:hover{background:#c42b1c;color:#fff}
+.winctl button:hover{background:var(--hover);color:var(--ink)}.winctl .close:hover{background:var(--danger);color:var(--on-act)}
 
 /* ── listening: three assignment modules wired to the speaker's EQ button ───── */
 .stage{position:relative;display:grid;place-items:center;overflow:hidden;background:var(--tex),var(--ivory);padding:14px 24px 34px}
@@ -145,15 +169,15 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .spkwrap{position:relative}
 .spk .speaker{width:100%;display:block;view-transition-name:speaker;filter:drop-shadow(0 18px 22px #00000026)}
 :root[data-theme=dark] .spk .speaker{filter:drop-shadow(0 18px 26px #000b)}
-.spk-halo{transition:opacity .5s ease}.spk-ring{transition:stroke .5s ease}.spk-led{transition:fill .5s}
-.spk-led.connecting{animation:blink 1s steps(2) infinite}
+.spk-halo{transition:opacity var(--t-slow) var(--ease)}.spk-ring{transition:stroke var(--t-slow) var(--ease)}.spk-led{transition:fill var(--t-slow) var(--ease)}
+.spk-led.connecting{animation:blink var(--t-busy) steps(2) infinite}
 .units{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(10px,1.6vw,20px);margin-bottom:clamp(30px,6vh,58px)}
 .conduits{position:absolute;inset:0;pointer-events:none;overflow:visible}
 .conduits .cut{fill:none;stroke:var(--groove);stroke-width:1.3}
 .conduits .cut.live{stroke-width:3.2}
 .conduits .lip{fill:none;stroke:var(--lip);stroke-width:1.3;transform:translateY(1px)}
 .conduits .core{fill:none;stroke-width:1.6}
-.conduits .wire{opacity:0;transition:opacity .45s ease}.conduits .wire.on{opacity:1}
+.conduits .wire{opacity:0;transition:opacity var(--t-slow) var(--ease)}.conduits .wire.on{opacity:1}
 .conduits .glow{fill:none;stroke-width:6;opacity:.2}
 .unit{position:relative;background:var(--well);border-radius:12px;padding:10px 12px 9px;min-width:0;
   box-shadow:inset 0 2px 4px #00000024,inset 0 -1px 0 var(--lip),0 1px 0 var(--lip)}
@@ -161,45 +185,46 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .unit .body{display:flex;gap:10px;align-items:stretch}
 /* the lamp key: a recessed bezel holding a lit face in the light's colour */
 .lampkey{flex:none;width:58px;height:58px;border-radius:9px;background:var(--bezel);padding:6px;box-shadow:inset 0 2px 4px #0005,0 1px 0 var(--lip);position:relative}
-.lampkey .face{display:block;width:100%;height:100%;border-radius:5px;border:1px solid #0004;box-shadow:0 3px 0 #0003,inset 0 -5px 10px #0002;transition:transform .07s,box-shadow .45s ease,filter .45s ease}
-.lampkey[data-light="0"] .face{background:linear-gradient(#5b5953,#3d3c38)}
-.lampkey[data-light="1"] .face{background:linear-gradient(#fffef8,#e2e0d7)}
-.lampkey[data-light="2"] .face{background:linear-gradient(#7fb2ff,#2f6fe4)}
+.lampkey .face{display:block;width:100%;height:100%;border-radius:5px;border:1px solid #0004;box-shadow:0 3px 0 #0003,inset 0 -5px 10px #0002;transition:transform var(--t-press) var(--ease),box-shadow var(--t-norm) var(--ease),filter var(--t-norm) var(--ease)}
+.lampkey[data-light="0"] .face{background:linear-gradient(var(--lamp0-a),var(--lamp0-b))}
+.lampkey[data-light="1"] .face{background:linear-gradient(var(--lamp1-a),var(--lamp1-b))}
+.lampkey[data-light="2"] .face{background:linear-gradient(var(--lamp2-a),var(--lamp2-b))}
 .lampkey:active .face{transform:translateY(2px);box-shadow:0 1px 0 #0003,inset 0 -5px 10px #0002}
 .unit.lit .lampkey[data-light="1"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px #ffffffcc;filter:brightness(1.05)}
-.unit.lit .lampkey[data-light="2"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px #3d8bffaa;filter:brightness(1.12)}
-.unit.lit .lampkey[data-light="0"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px #c4c7d070;filter:brightness(1.3)}
-.unit.armed .lampkey{animation:armed .9s steps(2) infinite}
-@keyframes armed{50%{box-shadow:inset 0 2px 4px #0005,0 0 0 3px var(--orange)}}
-.readout{flex:1;min-width:0;background:var(--lcd);border-radius:5px;padding:6px 9px 5px;box-shadow:inset 0 2px 5px #000a,0 1px 0 var(--lip);color:var(--lcd-ink);display:flex;flex-direction:column;justify-content:center;gap:5px;cursor:pointer;text-align:left}
+.unit.lit .lampkey[data-light="2"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px var(--blue-glow);filter:brightness(1.12)}
+.unit.lit .lampkey[data-light="0"] .face{box-shadow:0 3px 0 #0003,0 0 16px 3px var(--lamp0-glow);filter:brightness(1.3)}
+.unit.armed .lampkey{animation:armed var(--t-attn) ease-in-out infinite}
+@keyframes armed{50%{box-shadow:inset 0 2px 4px #0005,0 0 0 3px var(--act)}}
+.readout{flex:1;min-width:0;background:var(--lcd);border-radius:5px;padding:6px 9px 5px;box-shadow:inset 0 2px 5px var(--lcd-shade),0 1px 0 var(--lip);color:var(--lcd-ink);display:flex;flex-direction:column;justify-content:center;gap:5px;cursor:pointer;text-align:left}
 .readout .num{font:20px/1 Seg;position:relative;display:inline-block}
 .readout .num::before{content:"88";position:absolute;inset:0;color:var(--lcd-ghost)}
 .readout .num span{position:relative}
 .readout .nm{font:800 13px/1 Doto;letter-spacing:.05em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 .unit .foot{display:flex;align-items:center;gap:7px;margin-top:8px;min-height:20px}
 .unit .foot .engr{letter-spacing:.1em;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.led{width:7px;height:7px;border-radius:50%;transition:background .35s,box-shadow .35s;background:var(--led-off);box-shadow:inset 0 1px 2px #0005;flex:none}
-.led.amber{background:var(--amber);box-shadow:0 0 6px var(--amber)}
-.led.orange{background:var(--orange);box-shadow:0 0 6px var(--orange)}
-.led.blink{animation:blink .8s steps(2) infinite}
+.led{width:7px;height:7px;border-radius:50%;transition:background var(--t-norm) var(--ease),box-shadow var(--t-norm) var(--ease);background:var(--led-off);box-shadow:inset 0 1px 2px #0005;flex:none}
+.led.amber{background:var(--amber-face);box-shadow:0 0 6px var(--amber-glow)}
+.led.orange{background:var(--lit-face);box-shadow:0 0 6px var(--lit-glow)}
+.led.blink{animation:blink var(--t-busy) steps(2) infinite}
 .led.ok{background:var(--led-ok);box-shadow:inset 0 1px 2px #0003}
 .foot .mech{height:22px;padding:0 8px;font-size:10px;margin-left:auto;flex:none}
-.unit.drop{box-shadow:inset 0 2px 4px #00000024,0 0 0 2px var(--orange)}
+.unit.drop{box-shadow:inset 0 2px 4px #00000024,0 0 0 2px var(--act)}
 
 /* ── the program bank: the one dark instrument panel ────────────────────────── */
-.bank{background:var(--panel);color:#d9d5cb;display:flex;align-items:center;gap:16px;padding:0 24px;box-shadow:inset 0 1px 0 #ffffff12;min-width:0}
-.bank .legend{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;font-weight:600;letter-spacing:.2em;color:#8f8a7f;font-stretch:120%;flex:none}
+.bank{background:var(--panel);color:var(--bank-ink);display:flex;align-items:center;gap:16px;padding:0 24px;box-shadow:var(--bank-shade);min-width:0}
+.bank .legend{writing-mode:vertical-rl;transform:rotate(180deg);font-size:10.5px;font-weight:600;letter-spacing:.2em;color:var(--bank-ink-2);font-stretch:120%;flex:none}
 .keys{display:flex;gap:10px;align-items:flex-end;min-width:0;flex:1}
 .group{display:flex;flex-direction:column;gap:7px;min-width:0}
 .group.factory{flex:none}.group.user{flex:1}
-.group-label{font-size:10.5px;letter-spacing:.14em;font-weight:600;color:#8f8a7f;font-stretch:120%;display:flex;align-items:center;gap:8px}
-.group-label::after{content:"";flex:1;height:1px;background:#4a4945}
-/* 10px of headroom above the keys (taken back by the margin) so a lifted key and its lamp are not cut by
-   .userrow's overflow */
-.row{display:flex;gap:clamp(6px,.7vw,9px);padding:22px 0 4px;margin-top:-14px}
+.group-label{font-size:10.5px;letter-spacing:.14em;font-weight:600;color:var(--bank-ink-2);font-stretch:120%;display:flex;align-items:center;gap:8px}
+.group-label::after{content:"";flex:1;height:1px;background:var(--bank-rule)}
+/* Room above the keys for a lifted key and its lamp, and below for each key's drop shadow (0 3px edge + 6px/10px
+   blur reaches 16px), taken back by the margins so the bar's layout does not move. Without the room below,
+   .userrow's overflow cut every key's shadow off at the bottom. */
+.row{display:flex;gap:clamp(6px,.7vw,9px);padding:22px 0 18px;margin-top:-14px;margin-bottom:-14px}
 .userrow{overflow:hidden;min-width:0}   /* pinned keys that do not fit are left out (fit()), never cut */
 .pkey{width:var(--kw,clamp(56px,4.9vw,80px));height:84px;border-radius:7px;background:var(--key);color:var(--key-ink);display:flex;flex-direction:column;justify-content:space-between;align-items:flex-start;padding:8px 8px 7px;position:relative;
-  box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0006;transition:transform .08s var(--ease),box-shadow .08s,width .3s var(--ease);flex:none}
+  box-shadow:0 3px 0 var(--key-edge),0 6px 10px var(--key-drop);transition:transform var(--t-press) var(--ease),box-shadow var(--t-press) var(--ease),width var(--t-slow) var(--ease);flex:none}
 /* Every program key is ivory; only a program beyond the twelfth, visiting while it is edited, keeps the
    older faded tan, so it is plainly not one of the bar's own keys. */
 .pkey.prog.visiting{background:var(--key-user)}
@@ -207,41 +232,41 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .pkey.held{z-index:5;cursor:grabbing;transition:none;box-shadow:0 3px 0 var(--key-edge),0 14px 24px #0008}
 .pkey.carried{position:fixed;margin:0;pointer-events:none}
 .pkey.gap{visibility:hidden}
-.userrow.sorting .pkey:not(.held){transition:transform .2s var(--ease)}
+.userrow.sorting .pkey:not(.held){transition:transform var(--t-norm) var(--ease)}
 .pkey{touch-action:none}
 .pkey .n{font:700 24px/1 Archivo;font-stretch:112%;letter-spacing:-.02em}
 .pkey .t{font-size:11px;font-weight:500;font-stretch:82%;line-height:1.15;text-align:left;max-width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .pkey:active,.pkey.down{transform:translateY(3px);box-shadow:0 0 0 var(--key-edge),0 2px 4px #0006}
-.pkey .led{position:absolute;top:-11px;left:50%;width:14px;height:4px;margin-left:-7px;border-radius:2px;background:#4b4a46;box-shadow:none;transition:background .25s,box-shadow .25s}
-.pkey.playing .led{background:var(--amber);box-shadow:0 0 8px var(--amber)}
-.pkey.busy .led{background:var(--amber);animation:blink .5s steps(2) infinite}
+.pkey .led{position:absolute;top:-11px;left:50%;width:14px;height:4px;margin-left:-7px;border-radius:2px;background:var(--bank-led);box-shadow:none;transition:background var(--t-norm) var(--ease),box-shadow var(--t-norm) var(--ease)}
+.pkey.playing .led{background:var(--amber-face);box-shadow:0 0 8px var(--amber-glow)}
+.pkey.busy .led{background:var(--amber);animation:blink var(--t-busy) steps(2) infinite}
 /* an unsaved draft: a small amber lamp after the number */
-.pkey .dm{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber);box-shadow:0 0 6px var(--amber);margin-left:5px;vertical-align:4px}
+.pkey .dm{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--amber-face);box-shadow:0 0 6px var(--amber-glow);margin-left:5px;vertical-align:4px}
 .pkey .dot{position:absolute;right:7px;top:8px;display:flex;gap:3px}
 .pkey .dot i{width:7px;height:7px;border-radius:50%;border:1px solid #0004}
-.rec .dot i.l0,.pkey .dot i.l0{background:#55565c}.rec .dot i.l1,.pkey .dot i.l1{background:var(--white-light)}.rec .dot i.l2,.pkey .dot i.l2{background:var(--blue-light)}
-.pkey.add{background:transparent;border:1.5px dashed #6d6a63;box-shadow:none;color:#bdb7aa;align-items:center;justify-content:center;gap:2px;transition:width .3s var(--ease),opacity .25s ease,margin .3s var(--ease),border-color .25s}
+.rec .dot i.l0,.pkey .dot i.l0{background:var(--dot-off)}.rec .dot i.l1,.pkey .dot i.l1{background:var(--white-light)}.rec .dot i.l2,.pkey .dot i.l2{background:var(--blue-light)}
+.pkey.add{background:transparent;border:1.5px dashed var(--bank-add);box-shadow:none;color:var(--bank-add-ink);align-items:center;justify-content:center;gap:2px;transition:width var(--t-slow) var(--ease),opacity var(--t-norm) var(--ease),margin var(--t-slow) var(--ease),border-color var(--t-norm) var(--ease)}
 .app:not(.editing) .pkey.add{width:0;opacity:0;margin-left:calc(-1 * clamp(6px,.7vw,9px));padding:0;border-width:0;overflow:hidden}
 .pkey.add .n{font-weight:400}
-.pkey.lib{width:46px;padding:8px 4px 7px;background:#3c3c3f;color:#d9d5cb;box-shadow:0 3px 0 #1c1c1d,0 6px 10px #0006;align-items:center;justify-content:center;gap:8px}
+.pkey.lib{width:46px;padding:8px 4px 7px;background:var(--bank-key);color:var(--bank-ink);box-shadow:0 3px 0 var(--bank-key-edge),0 6px 10px var(--key-drop);align-items:center;justify-content:center;gap:8px}
 .pkey.lib svg{fill:currentColor;opacity:.85}.pkey.lib .t{font-weight:600;text-align:center;font-size:10px;font-stretch:90%}
-.pkey.lib:hover{background:#48484b}
+.pkey.lib:hover{background:var(--bank-key-hi)}
 /* open: the key stays pressed in, like a latched switch */
-.pkey.lib[aria-expanded=true]{transform:translateY(3px);background:#2f2f31;box-shadow:0 0 0 #1c1c1d,inset 0 2px 5px #000a}
+.pkey.lib[aria-expanded=true]{transform:translateY(3px);background:var(--bank-key-lo);box-shadow:0 0 0 var(--bank-key-edge),inset 0 2px 5px #000a}
 .pkey.lib .lib-close,.app.lib-open .pkey.lib .lib-all{display:none}.app.lib-open .pkey.lib .lib-close{display:block}
-.app.choosing .bank .pkey:not(.add):not(.lib),.app.choosing .rec .sleeve{animation:offer 1.2s ease-in-out infinite}
-@keyframes offer{50%{box-shadow:0 3px 0 var(--key-edge),0 0 0 3px var(--orange)}}
+.app.choosing .bank .pkey:not(.add):not(.lib),.app.choosing .rec .sleeve{animation:offer var(--t-attn) ease-in-out infinite}
+@keyframes offer{50%{box-shadow:0 3px 0 var(--key-edge),0 0 0 3px var(--act)}}
 .lcdwrap{display:flex;align-items:center;gap:14px;flex:none}
-.lcd{width:clamp(150px,13vw,210px);height:100px;background:var(--lcd);border-radius:6px;box-shadow:inset 0 2px 6px #000a,0 0 0 4px #1a1a1b;position:relative;overflow:hidden;view-transition-name:lcd;color:var(--lcd-ink)}
+.lcd{width:clamp(150px,13vw,210px);height:100px;background:var(--lcd);border-radius:6px;box-shadow:inset 0 2px 6px var(--lcd-shade),0 0 0 4px var(--lcd-bezel);position:relative;overflow:hidden;view-transition-name:lcd;color:var(--lcd-ink)}
 .lcd .lstate{position:absolute;right:10px;top:8px;font:800 10px Doto;color:var(--lcd-dim)}
 .lcd svg{position:absolute;inset:0 auto 0 0;width:clamp(150px,13vw,210px);height:100%}   /* fixed: the display folds over it */
-.lcd{transition:width .3s var(--ease),margin .3s var(--ease),opacity .2s ease,box-shadow .3s}
+.lcd{transition:width var(--t-slow) var(--ease),margin var(--t-slow) var(--ease),opacity var(--t-norm) var(--ease),box-shadow var(--t-slow) var(--ease)}
 .app.editing .lcd{width:0;opacity:0;margin-right:-14px;box-shadow:none}   /* YOURS takes the room while the display is on the plate */
 @media (max-width:1180px){.lcd{display:none}}
-.bigkey{width:78px;height:84px;border-radius:7px;background:var(--orange);color:#fff;font-weight:700;font-stretch:120%;letter-spacing:.06em;font-size:13px;box-shadow:0 3px 0 var(--orange-edge),0 6px 10px #0006;transition:transform .08s;flex:none;position:relative;overflow:hidden}
-.bigkey .ek{position:absolute;inset:0;display:grid;place-content:center;transition:opacity .25s ease,transform .3s var(--ease)}
+.bigkey{width:78px;height:84px;border-radius:7px;background:var(--act);color:var(--on-act);font-weight:700;font-stretch:120%;letter-spacing:.06em;font-size:13px;box-shadow:0 3px 0 var(--act-edge),0 6px 10px var(--key-drop);transition:transform var(--t-press) var(--ease);flex:none;position:relative;overflow:hidden}
+.bigkey .ek{position:absolute;inset:0;display:grid;place-content:center;transition:opacity var(--t-norm) var(--ease),transform var(--t-slow) var(--ease)}
 .bigkey .ek.done,.app.editing .bigkey .ek.edit{opacity:0;transform:translateY(8px)}.app.editing .bigkey .ek.edit{transform:translateY(-8px)}.app.editing .bigkey .ek.done{opacity:1;transform:none}
-.bigkey:active{transform:translateY(3px);box-shadow:0 0 0 var(--orange-edge)}
+.bigkey:active{transform:translateY(3px);box-shadow:0 0 0 var(--act-edge)}
 .bigkey small{display:block;font-weight:500;letter-spacing:0;font-size:10.5px;opacity:.85;margin-top:3px}
 
 /* ── editing: one manufactured plate — display, gain scale, faders, transport ─ */
@@ -249,28 +274,28 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .app.editing .surface{display:grid}
 .namebar{display:flex;align-items:center;gap:18px;min-width:0}
 .namebar input{font:700 26px Archivo;font-stretch:118%;letter-spacing:-.01em;border:0;background:none;color:var(--ink);border-bottom:2px solid transparent;padding:0 2px;min-width:0;flex:1 1 auto;max-width:520px}
-.namebar input:hover:not([readonly]){border-bottom-color:var(--rule)}.namebar input[readonly]{pointer-events:none}.namebar input:focus{outline:0;border-bottom-color:var(--orange)}
+.namebar input:hover:not([readonly]){border-bottom-color:var(--rule)}.namebar input[readonly]{pointer-events:none}.namebar input:focus{outline:0;border-bottom-color:var(--act)}
 .annunciators{display:flex;align-items:center;gap:14px;margin-left:auto;flex:none}
 .ann{display:flex;align-items:center;gap:7px}
-.ann .win{width:16px;height:11px;border-radius:2px;background:var(--win-off);box-shadow:inset 0 1px 2px #0005;transition:background .2s,box-shadow .2s}
-.ann.on.amber .win{background:var(--amber);box-shadow:0 0 8px var(--amber)}
-.ann.on.orange .win{background:var(--orange);box-shadow:0 0 8px var(--orange)}
-.ann.on.white .win{background:#fffef6;box-shadow:0 0 6px #fff,inset 0 0 0 1px #0002}
+.ann .win{width:16px;height:11px;border-radius:2px;background:var(--win-off);box-shadow:inset 0 1px 2px #0005;transition:background var(--t-norm) var(--ease),box-shadow var(--t-norm) var(--ease)}
+.ann.on.amber .win{background:var(--amber-face);box-shadow:0 0 8px var(--amber-glow)}
+.ann.on.orange .win{background:var(--lit-face);box-shadow:0 0 8px var(--lit-glow)}
+.ann.on.white .win{background:var(--ann-white);box-shadow:0 0 6px #fff,inset 0 0 0 1px #0002}
 .ann.on .engr{color:var(--ink)}
 
 .fplate{--chan:repeat(9,minmax(0,1fr));display:grid;grid-template-columns:40px var(--chan) 10px minmax(150px,176px);grid-template-rows:minmax(70px,1fr) auto auto;
   min-height:0;align-self:center;height:100%;max-height:calc(34vh + var(--fh) + 150px);padding:14px 16px 12px;border-radius:14px;background:var(--tex),var(--alu);
   box-shadow:inset 0 1px 0 var(--plate-hi),0 0 0 1px var(--plate-edge)}
-.lcdcell{grid-column:2/11;grid-row:1;min-height:0;padding:5px;border-radius:9px;background:#2d2c2a;box-shadow:inset 0 1px 0 #ffffff1a,0 1px 0 var(--lip)}
-.display{position:relative;height:100%;background:var(--lcd);border-radius:5px;box-shadow:inset 0 2px 8px #000c;view-transition-name:lcd;color:var(--lcd-ink);touch-action:none;overflow:hidden}
+.lcdcell{grid-column:2/11;grid-row:1;min-height:0;padding:5px;border-radius:9px;background:var(--lcd-cell);box-shadow:inset 0 1px 0 #ffffff1a,0 1px 0 var(--lip)}
+.display{position:relative;height:100%;background:var(--lcd);border-radius:5px;box-shadow:inset 0 2px 8px var(--lcd-deep);view-transition-name:lcd;color:var(--lcd-ink);touch-action:none;overflow:hidden}
 .display svg{position:absolute;inset:0;width:100%;height:100%}
 .display.editable{cursor:ns-resize}
-.grid line{stroke:#d5ecab;stroke-opacity:.07;stroke-width:1}.grid line.zero{stroke-opacity:.22}.grid text{fill:var(--lcd-dim);font:800 9px Doto}
-.col-hot{fill:#d5ecab10;transition:x .15s var(--ease)}
-.curve{fill:none;stroke:#e6f6c6;stroke-width:2.4;stroke-linejoin:round}
-.curve-fill{fill:#d5ecab0a;transition:opacity .3s}
+.grid line{stroke:var(--lcd-grid);stroke-opacity:var(--lcd-grid-a);stroke-width:1}.grid line.zero{stroke-opacity:.22}.grid text{fill:var(--lcd-dim);font:800 9px Doto}
+.col-hot{fill:var(--lcd-wash);transition:x var(--t-fast) var(--ease)}
+.curve{fill:none;stroke:var(--lcd-curve);stroke-width:2.4;stroke-linejoin:round}
+.curve-fill{fill:var(--lcd-wash-2);transition:opacity var(--t-norm) var(--ease)}
 .bars rect{fill:var(--lcd-ink);opacity:.12}
-.ghost{fill:none;stroke:var(--amber);stroke-width:1.3;stroke-dasharray:3 4;opacity:.85}
+.ghost{fill:none;stroke:var(--lcd-compare);stroke-width:1.3;stroke-dasharray:3 4}
 .mark{fill:var(--lcd);stroke:var(--lcd-ink);stroke-width:1.5}
 .nib{fill:var(--lcd-ink);opacity:0}
 /* gain scale and channels share one geometry: value window, then the fader travel */
@@ -287,26 +312,26 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .chan{position:relative;display:flex;flex-direction:column;align-items:center;min-width:0}
 .channels:not(.locked) .chan{cursor:ns-resize}
 .fplate{-webkit-user-select:none;user-select:none}
-.chan::before{content:"";position:absolute;inset:-7px 3px 0;border-radius:6px;background:#ffffff00;transition:background .15s}
+.chan::before{content:"";position:absolute;inset:-7px 3px 0;border-radius:6px;background:#ffffff00;transition:background var(--t-fast) var(--ease)}
 .chan.hot::before{background:var(--hot)}
-.chan .val{position:relative;height:24px;min-width:42px;padding:0 6px;display:flex;align-items:center;justify-content:flex-end;line-height:1;margin-bottom:10px;border-radius:3px;background:var(--lcd);box-shadow:inset 0 1px 3px #000a,0 1px 0 var(--lip);color:var(--lcd-ink);font:13px Seg;text-align:right}
+.chan .val{position:relative;height:24px;min-width:42px;padding:0 6px;display:flex;align-items:center;justify-content:flex-end;line-height:1;margin-bottom:10px;border-radius:3px;background:var(--lcd);box-shadow:inset 0 1px 3px var(--lcd-shade),0 1px 0 var(--lip);color:var(--lcd-ink);font:13px Seg;text-align:right}
 .chan .val i{font:700 12px/1 Archivo;font-style:normal;margin-right:3px}
 .slot{position:relative;width:46px;height:calc(var(--fh) + 26px);cursor:ns-resize;touch-action:none}
-.slot::before{content:"";position:absolute;left:50%;top:13px;bottom:13px;width:6px;margin-left:-3px;background:#2c2b29;border-radius:3px;box-shadow:inset 0 1px 2px #000,0 1px 0 var(--lip)}
-.cap{position:absolute;left:3px;width:40px;height:26px;border-radius:5px;background:var(--c);box-shadow:0 3px 0 #0003,0 4px 8px #0004,inset 0 1px 0 #ffffff55;transition:top .45s var(--ease)}
+.slot::before{content:"";position:absolute;left:50%;top:13px;bottom:13px;width:6px;margin-left:-3px;background:var(--fader-track);border-radius:3px;box-shadow:inset 0 1px 2px #000,0 1px 0 var(--lip)}
+.cap{position:absolute;left:3px;width:40px;height:26px;border-radius:5px;background:var(--c);box-shadow:0 3px 0 #0003,0 4px 8px #0004,inset 0 1px 0 #ffffff55;transition:top var(--t-slow) var(--ease)}
 .cap::after{content:"";position:absolute;left:6px;right:6px;top:50%;height:2px;margin-top:-1px;background:#ffffffd0;border-radius:1px}
 .slot.drag .cap{transition:none}
-.slot.locked{cursor:default}.slot.locked .cap{background:color-mix(in srgb,var(--c) 35%,#bdb7aa)}
+.slot.locked{cursor:default}.slot.locked .cap{background:color-mix(in srgb,var(--c) 35%,var(--cap-off))}
 .chan .hz{position:relative;margin-top:7px;font:700 12px Archivo;font-stretch:110%;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
 .groups{grid-column:2/11;grid-row:3;display:grid;grid-template-columns:repeat(3,1fr);gap:0 10px;padding:6px 6px 0}
 .groups span{border-top:2px solid var(--c);padding-top:4px;text-align:center;font-weight:600;font-stretch:120%;font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--engrave);text-shadow:0 1px 0 var(--tlip)}
 .transport{grid-column:12;grid-row:1/4;display:flex;flex-direction:column;gap:8px;margin-left:16px;padding-left:16px;border-left:1px solid var(--divider);box-shadow:-1px 0 0 var(--lip);min-height:0}
 .transport .mech{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.04em;width:100%;height:clamp(30px,calc((100vh - 360px) / 10),40px);display:flex;align-items:center;justify-content:space-between;text-align:left;flex:none}
-.transport .mech.go{background:linear-gradient(#ff7a3a,var(--orange));color:#fff;border-color:var(--orange-edge);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
-.transport .mech.state{background:linear-gradient(var(--ivory),var(--well));color:var(--ink);opacity:1;cursor:default;box-shadow:inset 0 1px 3px #0002;transform:translateY(2px)}
-.transport .mech.state .lamp{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.transport .mech.go{background:linear-gradient(var(--act-hi),var(--act));color:var(--on-act);border-color:var(--act-edge);box-shadow:0 2px 0 var(--act-edge),inset 0 1px 0 #ffffff60}
+.transport .mech.state{color:var(--ink);opacity:1;cursor:default}
+.transport .mech.state .lamp{background:var(--amber-face);box-shadow:0 0 8px var(--amber-glow)}
 .transport .mech .lamp{width:12px;height:8px;border-radius:2px;background:var(--win-off);box-shadow:inset 0 1px 2px #0005}
-.transport .mech[aria-pressed=true] .lamp{background:var(--orange);box-shadow:0 0 8px var(--orange)}
+.transport .mech[aria-pressed=true] .lamp{background:var(--lit-face);box-shadow:0 0 8px var(--lit-glow)}
 .transport .sep{flex:1;min-height:4px}
 .transport .note{font-size:11.5px;color:var(--ink-2);line-height:1.35}
 
@@ -316,9 +341,9 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .bank,.library{-webkit-user-select:none;user-select:none}.library input{-webkit-user-select:text;user-select:text}
 .library{position:relative;z-index:3;display:flex;flex-direction:column;min-height:0;margin:0 14px;padding:22px 22px 0;border-radius:14px 14px 0 0;
   background:var(--alu);box-shadow:inset 0 1px 0 var(--plate-hi),0 0 0 1px var(--plate-edge),0 -12px 30px #0003;
-  transform:translateY(100%);visibility:hidden;transition:transform .38s var(--ease),visibility 0s .38s}
-.library.open{transform:none;visibility:visible;transition:transform .38s var(--ease),visibility 0s}
-.lib-tab{position:absolute;left:50%;top:6px;width:64px;height:16px;margin-left:-32px;border-radius:8px;display:grid;place-items:center;color:var(--ink-3);transition:color .15s,background .15s}
+  transform:translateY(100%);visibility:hidden;transition:transform var(--t-norm) var(--ease-exit),visibility 0s var(--t-norm)}
+.library.open{transform:none;visibility:visible;transition:transform var(--t-slow) var(--ease),visibility 0s}
+.lib-tab{position:absolute;left:50%;top:6px;width:64px;height:16px;margin-left:-32px;border-radius:8px;display:grid;place-items:center;color:var(--ink-3);transition:color var(--t-fast) var(--ease),background var(--t-fast) var(--ease)}
 .lib-tab:hover{color:var(--ink);background:var(--hover)}
 .lib-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
 .lib-head .count{font:600 11px Archivo;font-stretch:120%;letter-spacing:.12em;color:var(--ink-3)}
@@ -331,24 +356,24 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .crate-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px 14px;align-content:start;min-height:60px}
 /* a record: sleeve (number, curve, name) with its disc peeking out of the top */
 .rec{position:relative;padding-top:44px;cursor:grab;touch-action:none;container-type:inline-size}
-.rec .discwrap{position:absolute;left:50%;top:28px;width:78%;aspect-ratio:1;transform:translateX(-50%);transition:transform .25s var(--ease)}
+.rec .discwrap{position:absolute;left:50%;top:28px;width:78%;aspect-ratio:1;transform:translateX(-50%);transition:transform var(--t-norm) var(--ease)}
 .rec .disc{display:block;width:100%;height:100%}
 .rec:hover .discwrap{transform:translate(-50%,-8px)}
+.fresh .rec .discwrap,.fresh .rec .sleeve{transition:none}   /* a rebuilt grid starts where it ends up (app.js library) */
 .rec.playing .discwrap{transform:translate(-50%,-28px)}.rec.playing{--disc-label:var(--amber)}
-.rec.spinning .disc{animation:spin 8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
+/* the playing record's disc turns once per --t-spin, driven from app.js (spinDisc) on the page's timeline */
 .rec .sleeve{position:relative;display:flex;flex-direction:column;aspect-ratio:1/1.02;padding:9px 10px 9px;border-radius:4px;background:var(--key);color:var(--key-ink);
-  box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0003,inset 0 2px 0 #0000001a;transition:transform .08s var(--ease),box-shadow .08s}
+  box-shadow:0 3px 0 var(--key-edge),0 6px 10px #0003,inset 0 2px 0 #0000001a;transition:transform var(--t-press) var(--ease),box-shadow var(--t-press) var(--ease)}
 .rec:active:not(.held) .sleeve{transform:translateY(3px);box-shadow:0 0 0 var(--key-edge),0 2px 4px #0003,inset 0 2px 0 #0000001a}
 .rec .n{font:700 clamp(20px,13cqw,30px)/1 Archivo;font-stretch:112%;letter-spacing:-.02em}
 .rec .mini{display:block;flex:1;min-height:30px;margin:9px 0 8px;border-radius:4px;overflow:hidden;
-  background:radial-gradient(#d5ecab12 .55px,transparent .9px) 0 0/3px 3px,radial-gradient(ellipse at 50% 40%,#2c3426,var(--lcd) 75%);box-shadow:inset 0 1px 3px #000a,inset 0 0 12px #0006}
+  background:radial-gradient(var(--lcd-dots) .55px,transparent .9px) 0 0/3px 3px,radial-gradient(ellipse at 50% 40%,var(--lcd-glow),var(--lcd) 75%);box-shadow:inset 0 1px 3px var(--lcd-shade),inset 0 0 12px var(--lcd-shade-2)}
 .rec .mini svg{display:block;width:100%;height:100%}
 .rec .mini path{fill:none;vector-effect:non-scaling-stroke}
 .rec .mini .g{stroke:var(--lcd-ink);stroke-opacity:.07;stroke-width:1}.rec .mini .z{stroke:var(--lcd-ink);stroke-opacity:.2;stroke-width:1}
 .rec .mini .f{fill:url(#minifill)}
 .rec .mini .glow{stroke:var(--lcd-ink);stroke-opacity:.18;stroke-width:5;stroke-linecap:round;stroke-linejoin:round}
-.rec .mini .c{stroke:#e6f6c6;stroke-width:1.7;stroke-linejoin:round}
+.rec .mini .c{stroke:var(--lcd-curve);stroke-width:1.7;stroke-linejoin:round}
 .rec .t{font-size:clamp(12px,7cqw,15px);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:26px}
 .rec .t.rolling{padding-right:0}
 .rec.held{z-index:5;cursor:grabbing;transition:none}.rec.held .sleeve{box-shadow:0 3px 0 var(--key-edge),0 16px 26px #0006}
@@ -360,48 +385,48 @@ input,textarea{-webkit-user-select:text;user-select:text}
 @keyframes roll{to{transform:translateX(calc(-1 * var(--d)))}}
 
 /* right-click menu on a record: a small panel of keys */
-.ctx{position:fixed;z-index:20;min-width:150px;padding:5px;border-radius:7px;background:var(--paper);border:1px solid var(--sheet-edge);box-shadow:0 12px 30px #0004;animation:drop .14s var(--ease)}
+.ctx{position:fixed;z-index:20;min-width:150px;padding:5px;border-radius:7px;background:var(--paper);border:1px solid var(--sheet-edge);box-shadow:0 12px 30px #0004;--dir:-1;animation:enter var(--t-norm) var(--ease)}
 .ctx button{display:block;width:100%;text-align:left;padding:7px 10px;border-radius:4px;font-size:13px}
 .ctx button:hover,.ctx button:focus-visible{background:var(--hover);outline:0}
-.ctx .danger{color:var(--high)}.ctx .sep{display:block;height:1px;margin:4px 6px;background:var(--rule)}
+.ctx .danger{color:var(--alarm)}.ctx .sep{display:block;height:1px;margin:4px 6px;background:var(--rule)}
 
 /* ── device sheet ───────────────────────────────────────────────────────────── */
-.sheet{position:fixed;right:24px;top:66px;width:368px;max-height:calc(100vh - 90px);overflow:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;background:var(--paper);border:1px solid var(--sheet-edge);border-radius:10px;padding:16px 18px 14px;z-index:9;box-shadow:0 20px 50px #0003;animation:drop .3s var(--ease)}
-@keyframes drop{from{opacity:0;transform:translateY(-8px)}}
+.sheet{position:fixed;right:24px;top:66px;width:368px;max-height:calc(100vh - 90px);overflow:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;background:var(--paper);border:1px solid var(--sheet-edge);border-radius:10px;padding:16px 18px 14px;z-index:9;box-shadow:0 20px 50px #0003;--dir:-1;animation:enter var(--t-slow) var(--ease)}
+
 .sheet section{padding:14px 0 12px;border-top:1px solid var(--rule)}.sheet section:first-child{border-top:0;padding-top:2px}
 .sheet h4{margin:0 0 10px}
 .dv-label{font-size:12.5px;font-weight:600;color:var(--ink);margin:2px 0 8px;display:flex;align-items:baseline;gap:8px}.dv-label small{font-weight:400;color:var(--ink-3);font-size:11.5px}
 /* every control in the sheet is the same key as the rest of the app: 1px edge, 2px drop, 5px corners */
 .chip,.wtile,.pk,.dv-seg{border:1px solid var(--mech-edge);border-radius:5px;background:linear-gradient(var(--mech-a),var(--mech-b));box-shadow:0 2px 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
-.chip,.pk{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 11px;font-size:12px;font-weight:500;transition:transform .07s,box-shadow .07s}
-.chip::before,.pk::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--win-off);box-shadow:inset 0 1px 1px #0004;transition:background .25s,box-shadow .25s}
-.chip[aria-pressed=true]::before,.pk[aria-pressed=true]::before{background:var(--orange);box-shadow:0 0 6px var(--orange)}
+.chip,.pk{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 11px;font-size:12px;font-weight:500;transition:transform var(--t-press) var(--ease),box-shadow var(--t-press) var(--ease)}
+.chip::before,.pk::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--win-off);box-shadow:inset 0 1px 1px #0004;transition:background var(--t-norm) var(--ease),box-shadow var(--t-norm) var(--ease)}
+.chip[aria-pressed=true]::before,.pk[aria-pressed=true]::before{background:var(--lit-face);box-shadow:0 0 6px var(--lit-glow)}
 .chip:active:not(:disabled),.pk:active,.wtile:active{transform:translateY(2px);box-shadow:0 0 0 var(--mech-edge),inset 0 1px 0 var(--mech-hi)}
 .chip:disabled{opacity:.45}
 .dv-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px}
 .dv-sw{width:100%;display:flex;justify-content:space-between;align-items:center;padding:10px 0 2px;text-align:left;gap:14px}
 .dv-sw b{display:block;font-weight:600;font-size:13px}.dv-sw small{display:block;font-size:11.5px;color:var(--ink-2);margin-top:1px}
 .dv-sw:disabled{opacity:.45}
-.dv-sw i{width:36px;height:20px;border-radius:5px;background:var(--sw-off);position:relative;flex:none;border:1px solid var(--mech-edge);box-shadow:inset 0 1px 2px #0004;transition:background .25s ease}
-.dv-sw i::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:3px;background:var(--key);box-shadow:0 1px 2px #0005;transition:transform .25s var(--ease)}
-.dv-sw[aria-checked=true] i{background:var(--orange)}.dv-sw[aria-checked=true] i::after{transform:translateX(16px)}
+.dv-sw i{width:36px;height:20px;border-radius:5px;background:var(--sw-off);position:relative;flex:none;border:1px solid var(--mech-edge);box-shadow:inset 0 1px 2px #0004;transition:background var(--t-norm) var(--ease)}
+.dv-sw i::after{content:"";position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:3px;background:var(--key);box-shadow:0 1px 2px #0005;transition:transform var(--t-norm) var(--ease)}
+.dv-sw[aria-checked=true] i{background:var(--act)}.dv-sw[aria-checked=true] i::after{transform:translateX(16px)}
 .dv-wgrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px 6px;padding-bottom:2px}
-.wtile{position:relative;height:46px;padding:16px 9px 0;font-size:12px;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:transform .07s,box-shadow .2s,border-color .2s}
+.wtile{position:relative;height:46px;padding:16px 9px 0;font-size:12px;font-weight:500;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:transform var(--t-press) var(--ease),box-shadow var(--t-fast) var(--ease),border-color var(--t-fast) var(--ease)}
 .wtile small{position:absolute;left:9px;top:5px;font-size:9.5px;font-weight:600;letter-spacing:.08em;color:var(--ink-3)}
-.wtile[aria-expanded=true]{border-color:var(--orange);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 var(--mech-hi)}
+.wtile[aria-expanded=true]{border-color:var(--act);box-shadow:0 2px 0 var(--act-edge),inset 0 1px 0 var(--mech-hi)}
 /* the picker slides open under the layout; the panel grows with it instead of jumping */
-.dv-pick{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows .3s var(--ease),opacity .25s ease}
+.dv-pick{display:grid;grid-template-rows:0fr;opacity:0;transition:grid-template-rows var(--t-slow) var(--ease),opacity var(--t-norm) var(--ease)}
 .dv-pick.open{grid-template-rows:1fr;opacity:1}.dv-pick>div{min-height:0;overflow:hidden}
 .dv-list{max-height:190px;overflow:auto;scrollbar-width:thin;scrollbar-color:var(--rule) transparent;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:10px 2px 8px}
 .dv-list h5{grid-column:1/-1;margin:2px 0 -1px;font-size:10px;font-weight:600;font-stretch:120%;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
 .pk{min-width:0;justify-content:flex-start;text-align:left}.pk span{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .dv-seg{display:grid;grid-template-columns:repeat(3,1fr);overflow:hidden}
-.dv-seg button{height:30px;font-size:11.5px;font-weight:600;font-stretch:115%;letter-spacing:.08em;text-transform:uppercase;border-left:1px solid var(--mech-edge);transition:background .2s,color .2s}
+.dv-seg button{height:30px;font-size:11.5px;font-weight:600;font-stretch:115%;letter-spacing:.08em;text-transform:uppercase;border-left:1px solid var(--mech-edge);transition:background var(--t-fast) var(--ease),color var(--t-fast) var(--ease)}
 .dv-seg button:first-child{border-left:0}
-.dv-seg button[aria-pressed=true]{background:var(--well);box-shadow:inset 0 1px 3px #0004;color:var(--orange)}
+.dv-seg button[aria-pressed=true]{background:var(--well);box-shadow:inset 0 1px 3px #0004;color:var(--act)}
 .dv-row{display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--rule)}.dv-row .mech{flex:1;height:30px;font-size:11px}
 .dv-note{font-size:11.5px;color:var(--ink-3);margin-top:10px;line-height:1.45}
-.dv-err{font-size:12.5px;color:var(--orange);margin:0 0 10px}
+.dv-err{font-size:12.5px;color:var(--act);margin:0 0 10px}
 /* a speaker's settings: one line under its name (firmware, and why there is no link when there is none) */
 .dv-sub{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink-2);margin:-4px 0 12px}
 .dv-hint{font-size:12.5px;color:var(--ink-2);margin:2px 0 4px;line-height:1.45}
@@ -409,10 +434,10 @@ input,textarea{-webkit-user-select:text;user-select:text}
 /* updates: the version on the left, the keys on the right */
 .dv-update{align-items:center}.dv-update .dv-ver{flex:1;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
 .dv-update .mech{flex:none;padding:0 12px}
-.dv-update .mech.go{background:linear-gradient(#ff7a3a,var(--orange));color:#fff;border-color:var(--orange-edge);box-shadow:0 2px 0 var(--orange-edge),inset 0 1px 0 #ffffff60}
+.dv-update .mech.go{background:linear-gradient(var(--act-hi),var(--act));color:var(--on-act);border-color:var(--act-edge);box-shadow:0 2px 0 var(--act-edge),inset 0 1px 0 #ffffff60}
 .dv-remove{padding-top:10px}.dv-remove p{font-size:12.5px;margin-bottom:8px}.dv-remove .dv-row{border-top:0;padding-top:0}
 .dv-link{font-size:11.5px;color:var(--ink-3);text-decoration:underline;text-underline-offset:2px}.dv-link:hover{color:var(--ink)}
-.mech.danger{background:linear-gradient(#ef6a4c,var(--high));color:#fff;border-color:#8f2b12;box-shadow:0 2px 0 #8f2b12,inset 0 1px 0 #ffffff50}
+.mech.danger{background:linear-gradient(var(--danger-hi),var(--alarm));color:var(--on-act);border-color:var(--danger-edge);box-shadow:0 2px 0 var(--danger-edge),inset 0 1px 0 #ffffff50}
 
 /* ── offline: everything that needs the speaker says so, and how to get it back ─ */
 .offline-card{position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);display:flex;flex-direction:column;align-items:center;gap:8px;padding:14px 22px;border-radius:10px;
@@ -428,12 +453,12 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .app.offline .meter{opacity:.5}
 .app.offline:not(.editing) .pkey:not(.add){filter:saturate(.25) brightness(.6);box-shadow:0 1px 0 var(--key-edge)}
 .app.offline .lcd .curve{stroke:var(--lcd-dim)}.app.offline .lcd .curve-fill{opacity:0}
-.lcd .lstate.off{color:var(--orange)}
+.lcd .lstate.off{color:var(--act)}
 
-.toast{position:fixed;left:50%;bottom:184px;transform:translateX(-50%);background:var(--ink);color:var(--ivory);padding:9px 16px;border-radius:99px;font-size:13px;z-index:10;animation:drop .25s var(--ease);white-space:nowrap}
+.toast{position:fixed;left:50%;bottom:184px;transform:translateX(-50%);background:var(--ink);color:var(--ivory);padding:9px 16px;border-radius:99px;font-size:13px;z-index:10;animation:toastin var(--t-slow) var(--ease);white-space:nowrap}
 .toast button{color:var(--amber);font-weight:600;margin-left:12px}
 .mock-strip{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;gap:10px;align-items:center;padding:8px 12px;background:#000e;color:#aaa;font:11px Archivo}
-.mock-strip button{border:1px solid #555;padding:3px 8px;border-radius:4px}.mock-strip button.on{background:var(--orange);color:#000}
+.mock-strip button{border:1px solid #555;padding:3px 8px;border-radius:4px}.mock-strip button.on{background:var(--act);color:#000}
 .mock-strip input{vertical-align:middle;width:90px}
 
 /* ── smaller windows: keep the composition, tighten the details ─────────────── */
@@ -452,36 +477,42 @@ input,textarea{-webkit-user-select:text;user-select:text}
   .unit .foot{margin-top:6px}.lampkey{width:52px;height:52px}
 }
 
-/* ── motion: mode changes step back, then the new parts rise in, in reading order ─ */
-@keyframes rise{from{opacity:0;transform:translateY(12px)}}
-@keyframes fall{from{opacity:0;transform:translateY(-10px)}}
-@keyframes fadein{from{opacity:0}}
-.stage>*,.surface>*,.lcdwrap{transition:opacity .15s ease,transform .15s ease}
-@keyframes liftout{to{opacity:0;transform:translateY(-10px)}}
-@keyframes sinkout{to{opacity:0;transform:translateY(12px)}}
-@keyframes fadeout{to{opacity:0}}
-.app.leaving .unit{animation:liftout .22s var(--ease) forwards}
-.app.leaving .unit:nth-child(2){animation-delay:.03s}.app.leaving .unit:nth-child(3){animation-delay:.06s}
-.app.leaving .conduits,.app.leaving .offline-card{animation:fadeout .16s ease forwards}
-.app.leaving .rig .spkwrap{animation:sinkout .26s var(--ease) forwards}
-.app.leaving .namebar,.app.leaving .fplate{animation:sinkout .26s var(--ease) forwards}
-.app.leaving .chan{animation:sinkout .22s calc((8 - var(--i,0)) * 10ms) var(--ease) forwards}
-.app.leaving .scale,.app.leaving .groups{animation:fadeout .18s ease forwards}
-.app.arriving .rig .spkwrap{animation:rise .55s var(--ease) both}
-.app.arriving .unit{animation:fall .45s var(--ease) both}
-.app.arriving .unit:nth-child(2){animation-delay:.05s}.app.arriving .unit:nth-child(3){animation-delay:.1s}
-.app.arriving .conduits{animation:fadein .5s .25s both}
-.app.arriving .namebar{animation:rise .4s var(--ease) both}
-.app.arriving .fplate{animation:rise .45s var(--ease) both}
-.app.arriving .lcdcell{animation:rise .5s .03s var(--ease) both}
-.app.arriving .chan{animation:rise .5s calc(var(--i,0) * 22ms + 60ms) var(--ease) both}
-.app.arriving .scale,.app.arriving .groups{animation:fadein .5s .15s both}
-.app.arriving .transport{animation:rise .5s .12s var(--ease) both}
-@keyframes cardin{from{opacity:0;transform:translate(-50%,-44%)}}@keyframes cardout{to{opacity:0;transform:translate(-50%,-44%)}}
-.offline-card:not([hidden]){animation:cardin .35s var(--ease) both}.offline-card.closing{animation:cardout .22s var(--ease) forwards}
-.sheet.closing{animation:none;opacity:0;transform:translateY(-6px);transition:opacity .16s,transform .16s}
-.toast.out{opacity:0;transform:translate(-50%,6px);transition:opacity .2s,transform .2s}
-:root.theming *,:root.theming *::before,:root.theming *::after{transition:background-color .4s,color .4s,border-color .4s,box-shadow .4s,fill .4s,stroke .4s!important}
+/* ── motion: one system (tokens in :root). A page change steps everything back together (--t-norm,
+   --ease-exit), then the new page enters in reading order, top to bottom, --stagger apart (--t-slow, --ease).
+   Things that come from above (the light modules, menus, the sheet) move with --dir:-1. ─ */
+@keyframes enter{from{opacity:0;transform:translateY(calc(var(--dir,1) * var(--rise)))}}
+@keyframes exit{to{opacity:0;transform:translateY(calc(var(--dir,1) * var(--rise)))}}
+@keyframes fade-in{from{opacity:0}}
+@keyframes fade-out{to{opacity:0}}
+@keyframes toastin{from{opacity:0;transform:translate(-50%,var(--rise))}}
+.stage>*,.surface>*,.lcdwrap{transition:opacity var(--t-fast) var(--ease),transform var(--t-fast) var(--ease)}
+.unit,.app.racked .spk-keys .pkey{--dir:-1}
+.app.leaving .unit,.app.leaving .rig .spkwrap,.app.leaving .namebar,.app.leaving .fplate,.app.leaving .chan,
+.app.racked.leaving .pick-art,.app.racked.leaving .pick-info{animation:exit var(--t-norm) var(--ease-exit) forwards}
+.app.leaving .unit:nth-child(2){animation-delay:var(--stagger)}.app.leaving .unit:nth-child(3){animation-delay:calc(var(--stagger) * 2)}
+.app.leaving .conduits,.app.leaving .offline-card,.app.leaving .scale,.app.leaving .groups{animation:fade-out var(--t-norm) var(--ease-exit) forwards}
+/* The title bar changes with the page too: its name and back key (‹ Speakers + the speaker's name, or Tribit
+   Connect), and the battery meter and link light (a speaker's pages only). They step back and come in with the
+   page, first in reading order. */
+.plate-name,.instruments{--dir:-1}
+.app.leaving .plate-name,.app.leaving .instruments{animation:exit var(--t-norm) var(--ease-exit) forwards}
+.app.arriving .plate-name,.app.arriving .instruments{animation:enter var(--t-slow) var(--ease) both}
+.app.arriving .unit,.app.arriving .rig .spkwrap,.app.arriving .namebar,.app.arriving .fplate,.app.arriving .lcdcell,.app.arriving .chan,.app.arriving .transport,
+.app.racked.arriving .pick-art,.app.racked.arriving .pick-info,.app.racked.arriving .spk-keys .pkey{animation:enter var(--t-slow) var(--ease) both}
+.app.arriving .unit:nth-child(2){animation-delay:var(--stagger)}.app.arriving .unit:nth-child(3){animation-delay:calc(var(--stagger) * 2)}
+.app.arriving .rig .spkwrap{animation-delay:calc(var(--stagger) * 3)}
+.app.arriving .conduits{animation:fade-in var(--t-slow) calc(var(--stagger) * 5) var(--ease) both}
+.app.arriving .fplate{animation-delay:var(--stagger)}
+.app.arriving .lcdcell{animation-delay:calc(var(--stagger) * 2)}
+.app.arriving .transport{animation-delay:calc(var(--stagger) * 3)}
+.app.arriving .chan{animation-delay:calc((var(--i,0) + 3) * var(--stagger))}
+.app.arriving .scale,.app.arriving .groups{animation:fade-in var(--t-slow) calc(var(--stagger) * 4) var(--ease) both}
+.app.racked.arriving .pick-info{animation-delay:var(--stagger)}
+@keyframes cardin{from{opacity:0;transform:translate(-50%,calc(-50% + var(--rise)))}}@keyframes cardout{to{opacity:0;transform:translate(-50%,calc(-50% + var(--rise)))}}
+.offline-card:not([hidden]){animation:cardin var(--t-slow) var(--ease) both}.offline-card.closing{animation:cardout var(--t-norm) var(--ease-exit) forwards}
+.sheet.closing{animation:none;opacity:0;transform:translateY(calc(-1 * var(--rise)));transition:opacity var(--t-norm) var(--ease-exit),transform var(--t-norm) var(--ease-exit)}
+.toast.out{opacity:0;transform:translate(-50%,var(--rise));transition:opacity var(--t-norm) var(--ease-exit),transform var(--t-norm) var(--ease-exit)}
+:root.theming *,:root.theming *::before,:root.theming *::after{transition:background-color var(--t-slow),color var(--t-slow),border-color var(--t-slow),box-shadow var(--t-slow),fill var(--t-slow),stroke var(--t-slow)!important}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 @media (forced-colors:active){
   .pkey,.mech,.unit,.readout,.lcd,.display,.bigkey,.chan .val{border:1px solid CanvasText;forced-color-adjust:none;background:Canvas;color:CanvasText}
@@ -489,7 +520,7 @@ input,textarea{-webkit-user-select:text;user-select:text}
   .curve{stroke:Highlight}.cap{background:ButtonText}
 }
 /* a record whose write is on its way blinks its number, as its key blinks its lamp */
-.rec.busy .sleeve .n{animation:blink .5s steps(2) infinite}
+.rec.busy .sleeve .n{animation:blink var(--t-busy) steps(2) infinite}
 /* the way to the app's own settings, from a speaker's */
 .dv-more{display:flex;align-items:baseline;gap:10px;border-top:1px solid var(--rule);padding-top:10px}.dv-more .dv-link{font-size:12.5px;color:var(--ink-2)}
 
@@ -503,37 +534,37 @@ input,textarea{-webkit-user-select:text;user-select:text}
 .rec.factory .sleeve{background:var(--key)}
 .rec .tag{position:absolute;right:9px;top:11px;font:600 9px Archivo;font-stretch:120%;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
 /* what is behind the library steps back while it is up, and returns as it leaves */
-.stage>*,.surface>*,.bank>*{transition:opacity .25s ease,transform .15s ease}
+.stage>*,.surface>*,.bank>*{transition:opacity var(--t-norm) var(--ease),transform var(--t-fast) var(--ease)}
 .app.lib-open .stage>*,.app.lib-open .surface>*,.app.lib-open>.bank>*{opacity:0}
 /* the EQ button on the drawing: no browser focus box; a ring for the keyboard */
 /* Only the home drawing's button is a control ([tabindex]); the Speakers page and the mini speaker are pictures. */
 .spk-eq{outline:0}
 .spk-eq[tabindex]{cursor:pointer}
-.kbd .spk-eq:focus-visible .spk-ring{stroke:var(--orange)}
+.kbd .spk-eq:focus-visible .spk-ring{stroke:var(--act)}
 /* the editor's keys: DELETE arms first (pressed in, red lamp, CONFIRM), the second press deletes */
-.transport .mech.del.armed{transform:translateY(2px);background:linear-gradient(var(--mech-b),var(--mech-a));box-shadow:inset 0 1px 3px #0003}
-.transport .mech.del.armed .lamp{background:var(--high);box-shadow:0 0 8px var(--high)}
-.ctx .danger.armed{background:var(--high);color:#fff}
+
+.transport .mech.del.armed .lamp{background:var(--alarm);box-shadow:0 0 8px var(--alarm)}
+.ctx .danger.armed{background:var(--alarm);color:var(--on-act)}
 /* Speakers page <-> a speaker's home page: the bottom bar's keys drop out with the page and the new ones
    rise in, on the same timing as the rest (store.js transition: .leaving, then .arriving) */
-.app.swapping.leaving:not(.racked)>.bank>:not(.legend),.app.swapping.leaving.racked .spk-bank>:not(.legend){animation:sinkout .24s var(--ease) forwards}
-.app.swapping.arriving:not(.racked)>.bank>:not(.legend){animation:rise .45s var(--ease) both}
-.app.swapping.arriving:not(.racked)>.bank>:nth-child(2){animation-delay:.04s}.app.swapping.arriving:not(.racked)>.bank>:nth-child(3){animation-delay:.08s}
+.app.swapping.leaving:not(.racked)>.bank>:not(.legend),.app.swapping.leaving.racked .spk-bank>:not(.legend){animation:exit var(--t-norm) var(--ease-exit) forwards}
+.app.swapping.arriving:not(.racked)>.bank>:not(.legend){animation:enter var(--t-slow) var(--ease) both}
+.app.swapping.arriving:not(.racked)>.bank>:nth-child(2){animation-delay:var(--stagger)}.app.swapping.arriving:not(.racked)>.bank>:nth-child(3){animation-delay:calc(var(--stagger) * 2)}
 /* The sideways legends are turned with transform, which a moving animation would replace (the word spun
    round): they only fade. */
-.app.swapping.leaving .bank .legend{animation:fadeout .2s ease forwards}
-.app.swapping.arriving .bank .legend{animation:fadein .45s ease both}
+.app.swapping.leaving .bank .legend{animation:fade-out var(--t-norm) var(--ease-exit) forwards}
+.app.swapping.arriving .bank .legend{animation:fade-in var(--t-slow) var(--ease) both}
 
 /* the widget's two steps in Settings */
 .steps{display:grid;gap:12px;margin-top:10px}
 .step{display:grid;grid-template-columns:22px 1fr;gap:10px;align-items:start}
 .step .no{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font:700 11px Archivo;background:var(--well);color:var(--ink-2);box-shadow:inset 0 1px 2px #0003}
-.step.done .no{background:var(--orange);color:#fff}
+.step.done .no{background:var(--act);color:var(--on-act)}
 .step b{display:block;font-size:13px}.step small{display:block;font-size:11.5px;color:var(--ink-2);line-height:1.4;margin:2px 0 6px}
 .step .mech{height:28px;font-size:10.5px}
 .step .ok{font:600 10.5px Archivo;font-stretch:120%;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
 /* pages arrive rather than cut: the cover lifting at launch, and Settings changing what it holds */
-.sheet.swap>*{animation:fadein .22s ease both}
+.sheet.swap>*{animation:fade-in var(--t-norm) var(--ease) both}
 /* UNDO rests pressed in while there is nothing to undo and pops up when there is (never greyed out) */
-.transport .mech.undo{transition:transform .18s var(--ease),box-shadow .18s var(--ease),background .18s}
-.transport .mech.sunk{transform:translateY(2px);background:linear-gradient(var(--mech-b),var(--mech-a));box-shadow:inset 0 1px 3px #0003;cursor:default}
+.transport .mech.undo{transition:transform var(--t-norm) var(--ease),box-shadow var(--t-norm) var(--ease),background var(--t-norm) var(--ease)}
+.transport .mech.sunk{cursor:default}

@@ -554,6 +554,7 @@ public:
     void handle_message(const JsonObject& m,int id){
         const std::wstring type(m.GetNamedString(L"type",L""));
         if(type==L"ready"){web->page_ready();web->post(state_json(true));return;}
+        if(type==L"painted"){web->reveal();return;}   // the page has drawn: uncloak the window (see WebViewHost::show)
         // A script error on the page, for the diagnostic log (written only while it is switched on).
         if(type==L"log"){diagnostic("page: "+tribit::narrow(std::wstring(m.GetNamedString(L"text",L"")).substr(0,1500)));return;}
         if(type==L"window"){web->command(std::wstring(m.GetNamedString(L"action",L"")));return;}

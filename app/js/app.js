@@ -6,7 +6,7 @@
 (function(){
 'use strict';
 const S=Store,M=S.M,B=M.BANDS,N=B.freqs.length,$=id=>document.getElementById(id),esc=S.esc;
-const region=i=>i<3?'var(--low)':i<6?'var(--mid)':'var(--high)';
+const region=i=>i<3?'var(--band-low)':i<6?'var(--band-mid)':'var(--band-high)';
 const ui={mode:'listen',edit:null,opened:null,hold:false,choosing:null,hot:-1,toast:null,pending:new Set(),wpick:null,lastPick:null,library:false,removing:false,armed:null};
 
 // ---- curves by band position --------------------------------------------------------------------
@@ -66,7 +66,7 @@ const viz={target:Array(N).fill(0),cur:Array(N).fill(0),raf:0,playing:false,list
 Bridge.on(m=>{
   if(m.type!=='spectrum')return;
   const was=viz.playing&&viz.listening;viz.listening=!!m.listening;viz.playing=!!m.playing;
-  if(was!==(viz.playing&&viz.listening)&&S.ready())bank();
+  if(was!==(viz.playing&&viz.listening)&&S.ready()){bank();library();}   // the record stops or turns at once
   viz.target=m.playing&&m.bands?.length===N?m.bands:Array(N).fill(0);
   if(!viz.raf&&!S.reduce())viz.raf=requestAnimationFrame(vizStep);
 });
@@ -144,7 +144,7 @@ function offlineCard(){
   const s=S.speaker,el=$('offline'),connecting=s.status==='connecting';
   // Linked again: the card fades out before it is hidden.
   if(S.linked()){if(!el.hidden&&!el.classList.contains('closing')){el.classList.add('closing');
-    setTimeout(()=>{el.classList.remove('closing');if(S.linked())el.hidden=true;},S.reduce()?0:220);}return;}
+    setTimeout(()=>{el.classList.remove('closing');if(S.linked())el.hidden=true;},S.reduce()?0:S.motion('t-norm'));}return;}
   el.classList.remove('closing');el.hidden=false;
   // Shown only for the moment before the Speakers page takes over (the grace period after a drop).
   const seen=lastSeen(s.lastSeen);
@@ -208,7 +208,7 @@ function rackTick(){
   else if(!why&&rk.why&&rk.why!=='manual'&&(rk.why!=='down'||linked))closeRack();
   if(wasBooting&&!booting&&!holding&&(s.status!=='connecting'||S.bootOver)){$('app').classList.remove('booting');
     // The cover lifts into the page, it does not cut to it.
-    if(!S.reduce()){$('app').classList.add('arriving');setTimeout(()=>$('app').classList.remove('arriving'),700);}
+    if(!S.reduce()){$('app').classList.add('arriving');setTimeout(()=>$('app').classList.remove('arriving'),S.enterMs());}
     render();}
 }
 // instant: the launch decision, made under the boot cover, so there is nothing to fade from.
@@ -230,7 +230,7 @@ function closeRack(){
 }
 // Between the Speakers page and a speaker's home page the bottom bar changes keys: the old ones drop
 // out with the page, the new ones rise in (styles under .swapping).
-function swapBank(){if(S.reduce())return;const a=$('app');a.classList.add('swapping');clearTimeout(swapBank.t);swapBank.t=setTimeout(()=>a.classList.remove('swapping'),1000);}
+function swapBank(){if(S.reduce())return;const a=$('app');a.classList.add('swapping');clearTimeout(swapBank.t);swapBank.t=setTimeout(()=>a.classList.remove('swapping'),S.exitMs()+S.enterMs());}
 function rack(){
   const sp=S.speakers,s=S.speaker,here=sp?.address;
   // The order is set when the page opens and kept while it is up, so a switch never reshuffles it.
@@ -300,6 +300,20 @@ $('spkkeys').addEventListener('keydown',e=>{
 document.addEventListener('visibilitychange',()=>{
   if(!document.hidden&&!rk.why&&S.ready()&&S.settled&&!S.linked()){rk.launch=true;rk.holdUntil=Date.now()+SHOW_HOLD;$('app').classList.add('booting');}
   rackTick();});
+// The window opens cloaked (src/webview_host.hpp) and the host waits for this page to say it has drawn, so it
+// never shows a blank frame. Back from the tray, the page comes in as a page change does; the first opening
+// has its own entrance (the cover lifting, above).
+let revealed=false;
+Bridge.on(m=>{
+  if(m.type!=='reveal')return;
+  const app=$('app');
+  if(revealed&&!S.reduce()&&!app.classList.contains('booting')){
+    app.classList.remove('leaving');app.classList.add('arriving');
+    clearTimeout(revealed.t);revealed={t:setTimeout(()=>app.classList.remove('arriving'),S.enterMs())};}
+  else revealed=revealed||{};
+  // Frames may be paused while the window is cloaked (it counts as hidden), so a timer answers too.
+  let sent=false;const done=()=>{if(!sent){sent=true;Bridge.send({type:'painted'});}};
+  requestAnimationFrame(()=>requestAnimationFrame(done));setTimeout(done,60);});
 
 // Engraved conduits from each module down to the EQ button; the playing light's is lit.
 // Three wires ease down from the modules and meet the button's ring side by side; the playing
@@ -386,18 +400,40 @@ const record=p=>{const lights=lightsOf(p.key);return `<div class="rec${p.factory
   <span class="sleeve"><span class="n">${pad2(S.number(p.key))}</span>${p.factory?'<span class="tag">≈ Factory</span>':''}
     <span class="mini">${mini(p)}</span><span class="t" data-name="${esc(p.name)}">${esc(p.name)}</span>
     ${lights.length?`<span class="dot">${lights.map(i=>`<i class="l${i}"></i>`).join('')}</span>`:''}</span></div>`;};
+// The playing record turns while music plays and stops where it is when it pauses. Every disc shares one
+// position on the page's animation timeline: turning, all of them start from spin.start; stopped, all hold
+// spin.at. So a disc drawn anew (a reorder rebuilds the grid) is at exactly the old one's angle in the same
+// frame, and a pause or resume carries on from where the disc is rather than restarting it.
+const SPIN=[{transform:'rotate(0deg)'},{transform:'rotate(360deg)'}],spin={start:0,at:0};   // at: ms into the turn while stopped, else null
+function spinMusic(turning){const now=document.timeline.currentTime??0;
+  if(turning&&spin.at!==null){spin.start=now-spin.at;spin.at=null;}
+  else if(!turning&&spin.at===null)spin.at=now-spin.start;}
+function spinDisc(disc,on){
+  let a=disc.getAnimations().find(x=>x.id==='spin');
+  if(!on||S.reduce()){a?.cancel();return;}
+  if(!a){a=disc.animate(SPIN,{duration:S.motion('t-spin')||8000,iterations:Infinity,easing:'linear'});a.id='spin';a.pause();a.currentTime=0;}
+  if(spin.at===null){if(a.playState!=='running'||a.startTime!==spin.start)a.startTime=spin.start;}
+  else if(a.playState!=='paused'||a.currentTime!==spin.at){a.pause();a.currentTime=spin.at;}
+}
 function library(){
   const el=$('library');el.classList.toggle('open',ui.library);el.inert=!ui.library;$('app').classList.toggle('lib-open',ui.library);
   if(!ui.library&&!el.dataset.drawn)return;
   const q=$('libsearch').value.trim().toLowerCase(),all=S.programs(),active=S.linked()?S.active():null;
   const html=all.map(record).join('');
-  if(el.dataset.drawn!==html&&!ldrag.started){el.dataset.drawn=html;$('libgrid').innerHTML=html;}
-  let shown=0;
+  // A rebuilt grid (after a drop, say) is drawn where it ends up: for its first frames nothing transitions, so a
+  // disc under the pointer appears raised instead of dropping in and lifting out again.
+  if(el.dataset.drawn!==html&&!ldrag.started){el.dataset.drawn=html;const g=$('libgrid');g.innerHTML=html;
+    g.classList.add('fresh');requestAnimationFrame(()=>requestAnimationFrame(()=>g.classList.remove('fresh')));}
+  spinMusic(!!active&&viz.listening&&viz.playing);
+  let shown=0;const roll=[];
+  // Every record's state is set before anything is measured (rollName reads widths): a record drawn anew is
+  // first styled already lifted as playing, so its disc does not dip and rise again after a reorder.
   el.querySelectorAll('[data-lkey]').forEach(c=>{const p=S.find(c.dataset.lkey);if(!p)return;
     c.hidden=!!q&&!(p.name.toLowerCase().includes(q)||pad2(S.number(p.key)).includes(q));shown+=!c.hidden;
     const on=active===p.key,ed=ui.mode==='edit'&&ui.edit===p.key;
-    c.classList.toggle('playing',on);c.classList.toggle('spinning',on&&viz.listening&&viz.playing);c.classList.toggle('editing',ed);c.classList.toggle('busy',ui.pending.has(p.key));
-    rollName(c.querySelector('.t'),on||ed);});
+    c.classList.toggle('playing',on);c.classList.toggle('editing',ed);c.classList.toggle('busy',ui.pending.has(p.key));
+    spinDisc(c.querySelector('.disc'),on);roll.push([c.querySelector('.t'),on||ed]);});
+  roll.forEach(([t,on])=>rollName(t,on));
   $('libcount').textContent=q?`${shown} of ${all.length}`:all.length;$('libempty').hidden=!q||shown>0;
 }
 function toggleLibrary(open){if(ui.library===open)return;ui.library=open;$('libsearch').value='';hideCtx();render();}
@@ -618,7 +654,7 @@ function toggleSheet(open){
   const el=$('sheet');clearTimeout(toggleSheet.t);el.classList.remove('closing');
   $('deviceBtn').setAttribute('aria-expanded',open);
   if(open){ui.wpick=null;ui.removing=false;el.hidden=false;sheet();return;}
-  if(el.hidden)return;el.classList.add('closing');toggleSheet.t=setTimeout(()=>{el.hidden=true;el.classList.remove('closing');},S.reduce()?0:160);
+  if(el.hidden)return;el.classList.add('closing');toggleSheet.t=setTimeout(()=>{el.hidden=true;el.classList.remove('closing');},S.reduce()?0:S.motion('t-norm'));
 }
 
 // ---- actions --------------------------------------------------------------------------------------
@@ -626,7 +662,7 @@ function toast(text,action){
   ui.toast?.remove();const t=document.createElement('div');t.className='toast';t.setAttribute('role','status');
   t.innerHTML=esc(text)+(action?`<button>${esc(action.label)}</button>`:'');
   if(action)t.querySelector('button').onclick=()=>{action.run();t.remove();};
-  document.body.append(t);ui.toast=t;setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),200);},action?7000:3200);
+  document.body.append(t);ui.toast=t;setTimeout(()=>{t.classList.add('out');setTimeout(()=>t.remove(),S.motion('t-norm'));},action?7000:3200);
 }
 // A program pressed without a link: say why, and offer Try again only when it can help.
 function notLinked(){const r=M.dropReason(S.speaker.reason,S.speaker.error);
@@ -785,7 +821,7 @@ document.addEventListener('click',async e=>{
     if(!S.linked()){notLinked();return;}
     play(p);return;}
   const k=t.closest('[data-key]');
-  if(k){k.classList.add('down');setTimeout(()=>k.classList.remove('down'),120);
+  if(k){k.classList.add('down');setTimeout(()=>k.classList.remove('down'),S.motion('t-press')+40);
     const p=S.find(k.dataset.key);
     if(ui.choosing!==null){const i=ui.choosing;ui.choosing=null;render();assign(i,p.key);return;}
     if(ui.mode==='edit'){load(p.key);return;}

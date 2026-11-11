@@ -8,7 +8,7 @@ const sim={
   speaker:{connected:true,status:'connected',error:'',name:'XSound Plus 2',firmware:'0.3.1',battery:90,
     preset:1,bands:[0,0,0,0,0,0,0,0,0],buttons:[{preset:0},{preset:1},{preset:3}],
     prompts:[1,1,1,1,1],autoShutdown:1,lastSeen:Date.now(),settled:false,reason:''},
-  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',devMode:/[?&]devmode/.test(location.search),widgetAdded:/[?&]widget/.test(location.search),version:'0.8.3',update:{state:'idle',version:''}},
+  settings:{release:false,logging:false,chosen:false,checkUpdates:true,tray:false,startup:'off',devMode:/[?&]devmode/.test(location.search),widgetAdded:/[?&]widget/.test(location.search),version:'0.9.7',update:{state:'idle',version:''}},
   latency:260,failNext:false,
 };
 // Paired Tribit speakers for the Speakers page. ?speakers=two adds a second XSound Plus 2,
@@ -24,9 +24,16 @@ PAIRED.six=[...PAIRED.two,
   {name:'Tribit StormBox Micro 2 — Kitchen Counter',model:'StormBox Micro 2',address:'00:11:22:33:44:04',connected:false,supported:false},
   {name:'Tribit XSound Mega',model:'XSound Mega',address:'00:11:22:33:44:05',connected:true,supported:false},
   {name:"Kanu's XSound Plus 2 Bedroom",model:'XSound Plus 2',address:'00:11:22:33:44:06',connected:false,supported:true}];
-sim.settings.startup=(location.search.match(/[?&]startup=([\w-]+)/)||[])[1]||sim.settings.startup;
-sim.paired=structuredClone(PAIRED[(location.search.match(/[?&]speakers=(\w+)/)||[])[1]]||PAIRED.one);
+sim.settings.startup=(location.search.match(/[?&]startup=([\w-]+)/)||[])[1]||sim.settings.startup;sim.paired=structuredClone(PAIRED[(location.search.match(/[?&]speakers=(\w+)/)||[])[1]]||PAIRED.one);
 sim.address=sim.paired.find(d=>d.supported)?.address||'';
+// States for screenshots: ?scene=compare (a moved fader, Compare on, a hovered channel) and ?scene=menu
+// (a record's right-click menu).
+{const scene=(location.search.match(/[?&]scene=(\w+)/)||[])[1],q=s=>document.querySelector(s);
+ if(scene==='compare')setTimeout(()=>{const slot=q('#channels [data-band="3"]');if(!slot)return;slot.focus();
+   for(let i=0;i<5;i++)slot.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}));
+   setTimeout(()=>{q('[data-do=compare]')?.click();q('#channels .chan')?.classList.add('hot');},900);},2500);
+ if(scene==='menu')setTimeout(()=>{const r=q('.rec[data-lkey]');if(!r)return;const b=r.getBoundingClientRect();
+   r.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true,clientX:b.left+b.width/2,clientY:b.top+b.height/2}));},2500);}
 // ?offline starts disconnected (screenshots of the offline state).
 // Like the host, the first attempt takes a moment and then settles (the page shows nothing about
 // the speaker until it does).

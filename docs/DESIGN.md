@@ -143,23 +143,29 @@ Colour has jobs. Do not introduce a colour without a job.
 |---|---|---|
 | Chassis | `--ivory` (light #ece8de / dark #22221f), `--well`, `--alu` (plate), `--paper` (sheet, cards) | surfaces |
 | Ink | `--ink`, `--ink-2`, `--ink-3`, `--engrave` | text tiers; `--engrave` for engraved legends |
-| Panel | `--panel` | the program bank only (the one dark panel; in dark theme it is darker still) |
+| Panel | `--panel`, `--bank-*` (ink, rule, led, add key, All key, `--bank-shade`) | the program bank only. Light: the deepest step of the ivory family (#d6cfbf). Dark: charcoal (#131313) |
 | Keys | `--key`, `--key-user`, `--key-edge`, `--key-ink` | program keys stay light in both themes; `--key-ink` is fixed dark |
-| Act / attention | `--orange` #ff5a14, `--orange-edge` | primary action (EDIT, Play), focus ring, armed, active lamps in Settings |
-| Playing | `--amber` #ffb21a | playing LED on keys, writing, Playing on the speaker |
-| Bands | `--low` #2f6fe4, `--mid` #2f9e5b, `--high` #e4572e | fader caps and LOW/MID/HIGH brackets only |
+| Act / attention | `--act`, `--act-edge`, `--act-hi`, `--on-act` | primary action (EDIT/DONE, Open, Update), switches on, focus ring, armed and offer pulses, drop target, the low-battery arc, display OFF. Light: ink (#34312b, ivory lettering). Dark: orange (#ff5a14) |
+| Lit lamps | `--lit`, `--lit-face`, `--lit-glow` | every lamp that is on (Settings chips, Compare, annunciators, `.led.orange`). Light: a warm bulb, radial #fff3cc → #f2b33d with a soft #f2b33d halo. Dark: flat orange |
+| Playing | `--amber`, `--amber-face`, `--amber-glow` | playing LED on keys, writing, Playing on the speaker. Light: the same bulb as `--lit`, so every glow in the window is one colour. Dark: #ffb21a |
+| Bands | `--band-low`, `--band-mid`, `--band-high` | fader caps and LOW/MID/HIGH brackets only. Light: slate #4f73a8, sage #5f8a5c, clay #b86a45. Dark: #2f6fe4, #2f9e5b, #e4572e |
+| Alarm | `--alarm`, `--danger`, `--danger-hi`, `--danger-edge` | Delete armed (lamp, menu item), Remove my data, the window's close hover. Light: brick #b8432f. Dark: #e4572e |
+| Compare | `--lcd-compare` | the dashed "as it was" curve on the display. Light: the display's ink at 55%. Dark: amber |
 | Lights | `Speaker.LIGHT` ['#4a4b51','#f7f8fb','#3d8bff'], `WIRE` ['#9b9ca4','#f6f6f1','#4d95ff'] | the speaker's three EQ-button lights; live conduit core colour |
-| LCD | `--lcd` #22271e, `--lcd-ink` #d5ecab, `--lcd-dim`, `--lcd-ghost` | every display, both themes |
+| LCD | `--lcd`, `--lcd-ink`, `--lcd-dim`, `--lcd-ghost`, `--lcd-grid/-curve/-wash/-dots/-glow`, `--lcd-shade/-deep`, `--lcd-bezel`, `--lcd-cell` | every display. Light: a backlit pale display (#dde3cf, ink #26301f), so the whole light window is one family. Dark: the green-on-black display (#22271e, ink #d5ecab) |
+| Fixed | `--needle`, `--blue-glow`, `--bulb-hi`, `--lamp0/1/2-*`, `--dot-off`, `--fader-track`, `--cap-off`, `--key-drop` | one job each; rules never write a colour of their own (`app/tests/style.test.js`) |
 | Relief | `--lip` (lit lower edge of recesses), `--tlip` (legend text shadow), `--plate-hi`, `--plate-edge`, `--groove` | the only depth vocabulary; dark theme inverts `--tlip` to a dark lip |
 | Mechanical keys | `--mech-a/-b` (gradient), `--mech-edge`, `--mech-hi` | every `.mech`, `.chip`, `.pk`, `.wtile`, `.dv-seg` |
 | Off states | `--led-off`, `--win-off`, `--sw-off`, `--bezel` | unlit lamps, switch track, lamp-key bezel |
-| Motion | `--ease` cubic-bezier(.2,.75,.2,1) | all eased motion |
+| Motion | `--ease` cubic-bezier(.2,.75,.2,1), `--ease-exit` cubic-bezier(.4,0,1,1), `--t-press` 80 ms, `--t-fast` 120, `--t-norm` 220, `--t-slow` 360, `--rise` 8px, `--stagger` 24 ms, `--t-busy` 1 s, `--t-attn` 1.2 s, `--t-spin` 8 s | every duration and curve (§6) |
 | Geometry | `--fh` clamp(96px, (100vh−452px)·.55, 240px) | fader travel follows window height |
 
 Theme: `js/theme.js` runs in `<head>` before CSS paints; reads `localStorage['tribit-connect.theme']`
 (`light|dark|device`), sets `html[data-theme]`, posts `{type:'theme',dark}` to the host (DWM dark frame,
 WebView background; host persists `LocalState/theme` to avoid a startup flash). Changes cross-fade via
-`:root.theming` for 450 ms. Never hard-code a colour that differs between themes; add a token to both blocks.
+`:root.theming` for `--t-slow`. Never write a colour in a rule: add a token (to both blocks if it differs
+between themes). Black and white shades for shadows and highlights are the only exception; `style.test.js`
+enforces it.
 
 Type: Archivo (variable width axis; `font-stretch` 80–125% does the condensed/extended work),
 Doto (dot-matrix, LCD text only), DSEG7 Classic Bold as `Seg` (numeric readouts only). Engraved legends
@@ -170,8 +176,9 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 
 - **Key family** (`.mech`, `.chip`, `.pk`, `.wtile`, `.dv-seg`, `.pager`-adjacent): 1px `--mech-edge`
   border, 5px radius, `0 2px 0 var(--mech-edge)` drop, `inset 0 1px 0 var(--mech-hi)`, gradient
-  `--mech-a→--mech-b`. `:active` translates 2px and removes the drop. Lamps are 6px dots via `::before`
-  (`--win-off` off, `--orange` + glow on). Do not create a button outside this family.
+  `--mech-a→--mech-b`. `:active` translates 2px and removes the drop; a latched key (open, armed, nothing to undo, a state) looks
+  exactly the same, with no reversed gradient or inner shadow, so pressing and latching never swap looks. Lamps are 6px dots via `::before`
+  (`--win-off` off, `--lit-face` + `--lit-glow` on). Do not create a button outside this family.
 - **Program key** (`.pkey`): 84px tall (72px under 700px window height), width clamp(62px,5.6vw,80px),
   number (Archivo 700 24px) + name; amber LED strip above (`.led`), light dots top-right
   (`.dot i.l0/l1/l2`), `.busy` = blinking LED while its write waits, `.playing` = amber LED. Every
@@ -267,13 +274,30 @@ No other fonts. Fonts are OFL and shipped in `app/fonts/` with licences.
 
 ## 6. Motion rules
 
-- Durations: press 70–80 ms; lamp/LED/halo/wire 250–500 ms; mode change 150 ms out + ≤700 ms in;
-  sheet open 300 ms / close 160 ms; picker grid-rows 300 ms; theme 400 ms; pen 700 ms; fader cap 450 ms.
-- Arrivals rise 10–12 px with `--ease`, staggered in reading order (modules 0/50/100 ms, channels
-  `--i`·22 ms + 60 ms). **Exits mirror them** (`.leaving`, 280 ms before the change): modules lift out,
-  the speaker and editor parts sink out (`liftout`/`sinkout`/`fadeout`, `forwards`), channels in reverse order.
-  Every element that appears must also have a way out (offline card `cardout`, sheet, toast, drawer,
-  mini speaker width/opacity). Animations on centred elements keep their centring transform (`cardin`).
+One system, calm and quick (since 0.9.0). Every duration and curve is a token in `:root`; rules never write
+their own (`style.test.js` enforces it), and JS timers read the same tokens (`Store.motion`, `exitMs`, `enterMs`).
+
+| Speed | Token | Used for |
+|---|---|---|
+| Press | `--t-press` 80 ms | a key or button going down |
+| Fast | `--t-fast` 120 ms | hover, colour of controls, the hot fader column |
+| Normal | `--t-norm` 220 ms | every exit; lamps, LEDs, switches, toast, menu, sheet close, the library closing |
+| Slow | `--t-slow` 360 ms | every entrance; library opening, sheet opening, fader caps, folding widths, the theme cross-fade |
+| Loops | `--t-busy` 1 s (blink), `--t-attn` 1.2 s (arming and offering pulse), `--t-spin` 8 s (a record) | status, never decoration |
+
+- Entering uses `--ease` (decelerate); leaving uses `--ease-exit` (accelerate away). No bounce, no overshoot.
+- One family of keyframes: `enter`, `exit` (opacity and `--rise`, 8 px), `fade-in`, `fade-out`. Direction is
+  `--dir` on the element: 1 moves from/to below, −1 from/to above (the light modules, the Speakers keys,
+  menus and the sheet). Centred elements keep their centring transform (`cardin`/`cardout`, the toast).
+- A page change (home, editor, Speakers, and the bank swap): everything steps back together in `--t-norm`
+  (`.leaving`, `Store.exitMs()` before the change), then the new page enters top to bottom, `--stagger`
+  (24 ms) apart, starting with the title bar's name, back key, meter and link light (they change with the
+  page); then modules, speaker, conduits; or name bar, plate, display, transport, then channels by `--i`.
+  Every element that appears must also have a way out (offline card, sheet, toast, drawer).
+- The window: a hidden window is shown cloaked (`WebViewHost::show`), the page answers `reveal` with `painted`
+  once it has drawn, and only then is it uncloaked (1.5 s fallback), so there is no frame of bare panel colour.
+  Back from the tray, the page enters as a page change does; the first opening lifts the cover. Closing to
+  the tray and minimising keep Windows' own animations.
 - The bank's program display folds as a shutter: its SVG has a fixed width, so nothing relayouts and the
   spectrum bars keep running while it reopens.
 - Library crates share one 6-column grid that fills the drawer; record type scales with `cqw`.
@@ -373,7 +397,9 @@ carries `TribitConnect-Setup-<x.y.z>.exe` and its `.sha256`; the download must m
 signature and be signed by CN=TribitConnect.Local (thumbprint in `updates.hpp`). It then runs setup `/update`:
 only the progress window, the package updates in place (data kept), and the app reopens. `package.ps1` writes
 the versioned setup and its `.sha256` to `out/`; publishing the release is a separate, owner-approved step.
-Installs from 0.4.0 and earlier have no updater and need one manual install.
+Installs from 0.4.0 and earlier have no updater and need one manual install. Published so far: v0.7.3
+(10 Nov 2026, the first with the updater) and v0.8.3 (11 Nov 2026, the first release the updater can offer).
+Each release carries the same five files: the setup, the versioned setup and `.sha256`, the MSIX and the `.cer`.
 
 **Tray and startup** (0.7.3, ported from Bandwave). Close to tray (`state.json` `tray`, default off): the
 window's WM_CLOSE hides it instead (`WebViewHost::on_close`), the WebView is set invisible so the page sees

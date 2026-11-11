@@ -44,9 +44,15 @@ public:
         start();
     }
     ~WebViewHost(){if(window)DestroyWindow(window);}
-    void show(){const bool was=visible();if(IsIconic(window))ShowWindow(window,SW_RESTORE);else ShowWindow(window,SW_SHOW);
+    // A hidden window is shown cloaked: it takes its place and the page draws, but nothing is on screen until
+    // the page says it has drawn (reveal()), so there is never a frame of bare panel colour first. If the page
+    // does not answer, the window is revealed anyway after 1.5 s.
+    void show(){const bool was=visible();
+        if(!was){cloak(true);post(L"{\"type\":\"reveal\"}");SetTimer(window,reveal_timer,1500,nullptr);}
+        if(IsIconic(window))ShowWindow(window,SW_RESTORE);else ShowWindow(window,SW_SHOW);
         if(controller_)controller_->put_IsVisible(TRUE);if(!was&&on_shown)on_shown(true);
         front();}
+    void reveal(){if(window)KillTimer(window,reveal_timer);cloak(false);}
     // In front and focused. Opened from the tray, Windows may refuse a plain SetForegroundWindow (the
     // taskbar or the tray's overflow panel still has the focus), which left the window behind the others:
     // then borrow the foreground thread's input state, and at the very least raise the window.
@@ -69,7 +75,7 @@ public:
         if(GetForegroundWindow()==window){SetActiveWindow(window);if(controller_)controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);}
     }
     // Hidden in the tray: the page is told it is hidden (document.hidden), so it pauses like a closed window.
-    void hide(){if(!visible())return;ShowWindow(window,SW_HIDE);
+    void hide(){if(!visible())return;ShowWindow(window,SW_HIDE);reveal();   // Windows' own close animation; never left cloaked
         if(GetActiveWindow()==window)SetActiveWindow(nullptr);   // not left as the active window while hidden (see front)
         if(controller_)controller_->put_IsVisible(FALSE);if(on_shown)on_shown(false);}
     bool visible()const{return window&&IsWindowVisible(window);}
@@ -92,7 +98,9 @@ private:
     winrt::com_ptr<ICoreWebView2Controller> controller_;
     winrt::com_ptr<ICoreWebView2> view_;
     std::vector<std::wstring> pending_;
-    bool ready_{},dark_{};
+    bool ready_{},dark_{},cloaked_{};
+    static constexpr UINT_PTR reveal_timer=1;
+    void cloak(bool on){if(!window||on==cloaked_)return;cloaked_=on;BOOL value=on;DwmSetWindowAttribute(window,DWMWA_CLOAK,&value,sizeof(value));}
     COREWEBVIEW2_COLOR background()const{return dark_?COREWEBVIEW2_COLOR{255,0x22,0x22,0x1f}:COREWEBVIEW2_COLOR{255,0xec,0xe8,0xde};}
 
     void start(){
@@ -167,6 +175,7 @@ private:
         case WM_ERASEBKGND:{RECT r{};GetClientRect(hwnd,&r);auto c=self->background();auto brush=CreateSolidBrush(RGB(c.R,c.G,c.B));
             FillRect(reinterpret_cast<HDC>(wp),&r,brush);DeleteObject(brush);return 1;}
         case WM_SIZE:self->resize();return 0;
+        case WM_TIMER:if(wp==reveal_timer){self->reveal();return 0;}break;
         case WM_MOVE:case WM_MOVING:if(self->controller_)self->controller_->NotifyParentWindowPositionChanged();break;
         case WM_ACTIVATE:if(self->controller_&&LOWORD(wp)!=WA_INACTIVE)self->controller_->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);break;
         case WM_CLOSE:if(self->on_close&&self->on_close()){self->hide();return 0;}DestroyWindow(hwnd);return 0;

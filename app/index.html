@@ -10,7 +10,7 @@
 <body>
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
   <!-- A record for the library: shared by every sleeve. The label takes --disc-label (amber while playing). -->
-  <linearGradient id="minifill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d5ecab" stop-opacity=".22"/><stop offset="1" stop-color="#d5ecab" stop-opacity="0"/></linearGradient>
+  <linearGradient id="minifill" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--lcd-grid);stop-opacity:.22"/><stop offset="1" style="stop-color:var(--lcd-grid);stop-opacity:0"/></linearGradient>
   <symbol id="disc" viewBox="0 0 100 100">
     <circle cx="50" cy="50" r="49.5" fill="#161617"/><circle cx="50" cy="50" r="48.8" fill="none" stroke="#ffffff38" stroke-width="1.2"/>
     <g fill="none" stroke="#ffffff12" stroke-width=".7"><circle cx="50" cy="50" r="44"/><circle cx="50" cy="50" r="38.5"/><circle cx="50" cy="50" r="33"/><circle cx="50" cy="50" r="27.5"/></g>
@@ -60,7 +60,7 @@
       <div class="scale left" id="scaleL" aria-hidden="true"></div>
       <div class="channels" id="channels"></div>
       <div class="scale right" id="scaleR" aria-hidden="true"></div>
-      <div class="groups" aria-hidden="true"><span style="--c:var(--low)">Low</span><span style="--c:var(--mid)">Mid</span><span style="--c:var(--high)">High</span></div>
+      <div class="groups" aria-hidden="true"><span style="--c:var(--band-low)">Low</span><span style="--c:var(--band-mid)">Mid</span><span style="--c:var(--band-high)">High</span></div>
       <div class="transport" id="transport"></div>
     </div>
   </section>

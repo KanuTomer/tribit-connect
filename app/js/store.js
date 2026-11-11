@@ -155,6 +155,11 @@ Core.reduce=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
 // A change is never dropped: if another transition starts while one is still stepping back, the
 // waiting change happens first (it used to be cancelled, which could leave two pages half shown).
 let shift=0,waiting=null;
+// The motion tokens in app.css (--t-norm, --t-slow, --stagger), in ms, so timers and styles never disagree.
+// Exits take --t-norm plus a little stagger; arrivals take --t-slow plus the longest stagger (the faders).
+Core.motion=name=>{const v=getComputedStyle(document.documentElement).getPropertyValue('--'+name).trim();return v.endsWith('ms')?parseFloat(v):v.endsWith('s')?parseFloat(v)*1000:0;};
+Core.exitMs=()=>Core.motion('t-norm')+Core.motion('stagger')*3;
+Core.enterMs=()=>Core.motion('t-slow')+Core.motion('stagger')*14;
 Core.transition=fn=>{
   const app=document.getElementById('app');
   clearTimeout(shift);
@@ -162,7 +167,7 @@ Core.transition=fn=>{
   if(Core.reduce()||document.hidden){app.classList.remove('leaving','arriving');fn();return;}
   app.classList.remove('arriving');app.classList.add('leaving');waiting=fn;
   shift=setTimeout(()=>{waiting=null;app.classList.remove('leaving');fn();app.classList.add('arriving');
-    shift=setTimeout(()=>app.classList.remove('arriving'),700);},280);   // long enough for the exits
+    shift=setTimeout(()=>app.classList.remove('arriving'),Core.enterMs());},Core.exitMs());
 };
 Bridge.send({type:'ready'});
 root.Store=Core;
